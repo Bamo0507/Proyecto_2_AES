@@ -108,8 +108,3 @@ poner más trabajadores que recursos disponibles al medir rendimiento.
 Repetir los casos y conservar la variación entre sus tiempos. Una búsqueda muy
 corta puede estar dominada por el ruido del reloj y del sistema; los casos de
 prueba pequeños sirven para comprobar el funcionamiento.
-
-`scripts/run_benchmarks.sh` conserva la comparación anterior entre `aes_search_ctr`
-y `aes_search_mpi`, que comprueban solo el inicio del mensaje. Sus resultados
-pertenecen a ese ejercicio y se guardan por separado. El ejemplo original ECB
-se conserva como referencia de estudio.

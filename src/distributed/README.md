@@ -7,7 +7,6 @@ resultados.
 
 | Programa | Cómo busca |
 | --- | --- |
-| `aes_search_mpi` | Reparte las claves por turnos. Por ejemplo, con dos trabajadores, uno prueba 0, 2, 4… y el otro 1, 3, 5… Comprueba el inicio del mensaje. |
 | `aes_search_mpi_blocks` | Da a cada trabajador un grupo de claves consecutivas. Cada uno recorre su grupo en orden y busca la frase `es una prueba de` en el mensaje recuperado. |
 | `aes_search_mpi_hybrid` | Conserva esos grupos, pero combina pruebas consecutivas con los «tiros revueltos» de la propuesta. Busca la misma frase. |
 

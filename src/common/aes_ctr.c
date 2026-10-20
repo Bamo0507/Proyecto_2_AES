@@ -1,13 +1,11 @@
 /*
- * Usa OpenSSL para preparar el mensaje, construir posibles claves y
- * comprobarlas. Las versiones del programa comparten estas operaciones y eligen
- * por separado su orden de búsqueda.
+ * Usa OpenSSL para cifrar, descifrar y construir posibles claves. Las búsquedas
+ * comparten estas operaciones y eligen por separado el orden de las pruebas.
  */
 #include "aes_ctr.h"
 
 #include <string.h>
 #include <limits.h>
-#include <openssl/rand.h>
 
 int aes_ctr_context_open(AesCtrContext *aes_context)
 {
@@ -52,20 +50,6 @@ void aes_ctr_make_candidate_key(const unsigned char base_key[AES_KEY_LENGTH],
     }
 }
 
-int aes_ctr_transform(AesCtrContext *aes_context,
-                      const unsigned char key[AES_KEY_LENGTH],
-                      const unsigned char initialization_vector[AES_IV_LENGTH],
-                      const unsigned char *input, size_t input_length,
-                      unsigned char output[AES_OUTPUT_CAPACITY])
-{
-    /* El tamaño admitido también cabe en el número entero que espera OpenSSL. */
-    if (input_length == 0 || input_length > AES_MAX_MESSAGE_LENGTH) {
-        return 0;
-    }
-    return aes_ctr_transform_buffer(aes_context, key, initialization_vector, input,
-                                     input_length, output, AES_OUTPUT_CAPACITY);
-}
-
 int aes_ctr_transform_buffer(AesCtrContext *aes_context,
                              const unsigned char key[AES_KEY_LENGTH],
                              const unsigned char initialization_vector[AES_IV_LENGTH],
@@ -93,41 +77,4 @@ int aes_ctr_transform_buffer(AesCtrContext *aes_context,
     }
     /* El mensaje debe ocupar lo mismo antes y después del cifrado. */
     return bytes_written + final_bytes_written == (int)input_length;
-}
-
-int aes_ctr_prepare_problem(AesCtrContext *aes_context, const SearchOptions *search_options,
-                            AesSearchProblem *search_problem)
-{
-    unsigned char secret_key[AES_KEY_LENGTH];
-    /* Estos datos de inicio se generan una sola vez para cada mensaje. */
-    if (RAND_bytes(search_problem->base_key, AES_KEY_LENGTH) != 1 ||
-        RAND_bytes(search_problem->initialization_vector, AES_IV_LENGTH) != 1) {
-        return 0;
-    }
-    /* La clave conocida sirve para crear el ejercicio; no se consulta al probar candidatas. */
-    aes_ctr_make_candidate_key(search_problem->base_key, search_options->secret_candidate,
-                               search_options->unknown_key_bits, secret_key);
-    return aes_ctr_transform(aes_context, secret_key, search_problem->initialization_vector,
-                              (const unsigned char *)search_options->message,
-                              search_options->message_length, search_problem->ciphertext);
-}
-
-int aes_ctr_test_candidate(AesCtrContext *aes_context, const SearchOptions *search_options,
-                           const AesSearchProblem *search_problem, uint64_t candidate,
-                           int *matches_prefix)
-{
-    unsigned char candidate_key[AES_KEY_LENGTH];
-    unsigned char decrypted_message[AES_OUTPUT_CAPACITY];
-    aes_ctr_make_candidate_key(search_problem->base_key, candidate,
-                               search_options->unknown_key_bits, candidate_key);
-    /* Volver al mismo inicio permite comprobar solo el comienzo del mensaje. */
-    if (!aes_ctr_transform(aes_context, candidate_key, search_problem->initialization_vector,
-                            search_problem->ciphertext, search_options->prefix_length,
-                            decrypted_message)) {
-        return 0;
-    }
-    /* Compara la cantidad indicada de bytes, aunque alguno valga cero. */
-    *matches_prefix = memcmp(decrypted_message, search_options->message,
-                             search_options->prefix_length) == 0;
-    return 1;
 }

@@ -85,6 +85,12 @@ def check_sequential_file(binary_directory):
         for arguments in [[], [str(message_path)], [str(message_path), "4", "2"],
                           [str(message_path), "0", "57"],
                           [str(message_path), "-1", "8"],
+                          [str(message_path), "+1", "8"],
+                          [str(message_path), " 1", "8"],
+                          [str(message_path), "1x", "8"],
+                          [str(message_path), "", "8"],
+                          [str(message_path), "0", "0"],
+                          [str(message_path), "0", "8", "extra"],
                           [str(message_path), str(1 << 64), "8"],
                           [str(message_path.with_name("no_existe.txt")), "0", "8"]]:
             run_program([executable, *arguments], successful=False)
@@ -186,50 +192,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin-dir", type=Path, default=Path("build/bin"))
     mpi_modes = parser.add_mutually_exclusive_group()
-    mpi_modes.add_argument("--mpi", action="store_true")
     mpi_modes.add_argument("--mpi-blocks", action="store_true")
     mpi_modes.add_argument("--mpi-hybrid", action="store_true")
     parser.add_argument("--mpiexec", default="mpirun")
     command_options = parser.parse_args()
     binary_directory = command_options.bin_dir.resolve()
-    invalid_arguments = [
-        ["0"], ["41"], ["-1"], ["+1"], [" 1"], ["1x"], [""],
-        ["18446744073709551616"], ["2", "4"], ["2", "-1"],
-        ["2", "0", ""], ["2", "0", "a" * 257], ["2", "0", "a", "extra"],
-    ]
     if command_options.mpi_hybrid:
         check_mpi_hybrid(binary_directory, shlex.split(command_options.mpiexec))
     elif command_options.mpi_blocks:
         check_mpi_blocks(binary_directory, shlex.split(command_options.mpiexec))
-    elif command_options.mpi:
-        executable = str(binary_directory / "aes_search_mpi")
-        mpi_launcher = shlex.split(command_options.mpiexec)
-        # Incluye trabajadores sin claves, grupos desiguales y hallazgos fuera del trabajador 0.
-        for process_count, unknown_bits, secret_candidate in [
-            (1, 12, 4095), (2, 12, 0), (2, 16, 50000),
-            (3, 13, 8191), (3, 16, 65535), (4, 1, 1),
-        ]:
-            command = mpi_launcher + ["-np", str(process_count), executable,
-                                  str(unknown_bits), str(secret_candidate)]
-            expected_count = (1 << unknown_bits) if secret_candidate == (1 << unknown_bits) - 1 else None
-            verify_search(command, secret_candidate, "Puedes lograrlo!", expected_count)
-        for arguments in invalid_arguments:
-            run_program(mpi_launcher + ["-np", "2", executable, *arguments], successful=False)
-        print("OK: MPI con 1/2/3/4 procesos, rondas, ranks sin trabajo y argumentos invalidos.")
     else:
-        ecb_output = run_program([str(binary_directory / "aes_search_ecb")])
-        if "Clave encontrada: 12345\n" not in ecb_output:
-            raise AssertionError(ecb_output)
-        executable = str(binary_directory / "aes_search_ctr")
-        for unknown_bits, secret_candidate in [(1, 0), (1, 1), (12, 4095), (16, 50000), (40, 0)]:
-            verify_search([executable, str(unknown_bits), str(secret_candidate)],
-                          secret_candidate, "Puedes lograrlo!", secret_candidate + 1)
-        for message in ["abcdefgh", "a" * 256, "Mensaje con espacios y acentos: éxito"]:
-            verify_search([executable, "8", "255", message], 255, message, 256)
-        verify_search([executable, "8"], 255, "Puedes lograrlo!", 256)
-        for arguments in invalid_arguments:
-            run_program([executable, *arguments], successful=False)
-        print("OK: referencia ECB, busqueda CTR, limites y argumentos invalidos.")
         check_sequential_file(binary_directory)
 
 

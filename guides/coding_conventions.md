@@ -23,12 +23,10 @@ operaciones que necesitan varias versiones del programa.
 La referencia secuencial de archivos y las versiones MPI por bloques e híbrida
 usan `file_search` para leer el mensaje, convertir un número en una clave de 16
 bytes, cifrar y comprobar la frase. Así se compara la forma de buscar manteniendo
-el mismo trabajo por clave. Las versiones anteriores se conservan como ejemplos.
+el mismo trabajo por clave.
 
-Las búsquedas secuenciales que comparten módulos consultan el mismo reloj mediante
-`search_timing`. Los programas con MPI usan su propio reloj y reúnen las duraciones
-al terminar. El ejemplo ECB original conserva sus funciones para poder estudiarlo
-por separado.
+La búsqueda secuencial de archivos mide el tiempo mediante `search_timing`.
+Los programas con MPI usan su propio reloj y reúnen las duraciones al terminar.
 
 ## Memoria y errores
 
@@ -43,8 +41,7 @@ como si fueran copias nuevas.
 
 Usar `size_t` para tamaños en memoria y `uint64_t` para números de clave. Antes de
 convertir tamaños a los enteros que esperan OpenSSL o MPI, comprobar sus límites.
-Las versiones que comparan el inicio del mensaje aceptan hasta 256 bytes; las
-que leen archivos aceptan hasta 4096.
+Las búsquedas que leen archivos aceptan hasta 4096 bytes.
 
 Revisar que los argumentos numéricos contengan solo dígitos, que quepan en el tipo
 usado y que estén dentro del rango permitido. Comprobar el resultado de la

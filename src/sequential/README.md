@@ -1,11 +1,9 @@
 # Búsqueda con un solo trabajador
 
-Cada programa prueba una clave tras otra, sin repartir el trabajo con MPI.
+El programa prueba una clave tras otra, sin repartir el trabajo con MPI.
 
 | Programa | Para qué sirve |
 | --- | --- |
-| `aes_search_ecb` | Ejemplo original con un mensaje fijo de 16 bytes. Se conserva para estudiar el proceso. |
-| `aes_search_ctr` | Versión anterior que recibe el mensaje al iniciar el programa y comprueba su comienzo. |
 | `aes_search_file` | Referencia del proyecto actual: lee un archivo y busca la frase `es una prueba de` en el mensaje recuperado. |
 
 `aes_search_file` comparte la lectura, el cifrado, la conversión de claves y la

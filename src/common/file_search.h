@@ -6,12 +6,17 @@
 #define AES_FILE_SEARCH_H
 
 #include "aes_ctr.h"
+#include "search_options.h"
+
+#include <stdio.h>
 
 #define FILE_SEARCH_MAX_MESSAGE_LENGTH 4096
 #define FILE_SEARCH_OUTPUT_CAPACITY (FILE_SEARCH_MAX_MESSAGE_LENGTH + EVP_MAX_BLOCK_LENGTH)
 #define FILE_SEARCH_MAX_BITS 56
 #define FILE_SEARCH_DEFAULT_BITS 56
 #define FILE_SEARCH_PHRASE "es una prueba de"
+/* Valor reservado para indicar que no se encontró una coincidencia. */
+#define AES_CANDIDATE_NOT_FOUND UINT64_MAX
 
 typedef struct {
     const char *message_path;  /* Ruta del archivo tomada de la entrada; no se libera aquí. */
