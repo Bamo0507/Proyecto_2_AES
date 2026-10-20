@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import tempfile
 
 
 def run_program(command, successful=True):
@@ -30,10 +31,46 @@ def verify_search(command, candidate, message, candidate_count=None):
             raise AssertionError(f"Conteo incorrecto: {command}\n{output}")
 
 
+def check_mpi_blocks(binary_directory, launcher):
+    """Protege la lectura de archivo y el reparto por bloques recibidos de main."""
+    executable = str(binary_directory / "aes_search_mpi_blocks")
+    message = "Esta es una prueba de proyecto 2"
+    with tempfile.TemporaryDirectory(prefix="aes-mpi-blocks-") as directory:
+        message_path = Path(directory) / "mensaje.txt"
+        message_path.write_text(message + "\r\n", encoding="utf-8")
+        for processes, unknown_bits, secret_candidate in [
+            (1, 12, 4095), (2, 16, 50000), (3, 13, 8191), (4, 1, 1),
+        ]:
+            verify_search(
+                launcher + ["-np", str(processes), executable, str(message_path),
+                            str(secret_candidate), str(unknown_bits)],
+                secret_candidate, message,
+            )
+        # El valor predeterminado de 56 bits tambien debe funcionar con clave 0.
+        verify_search(launcher + ["-np", "2", executable, str(message_path), "0"],
+                      0, message)
+        base_command = launcher + ["-np", "2", executable]
+        for arguments in [[], [str(message_path)], [str(message_path), "4", "2"],
+                          [str(message_path), "0", "57"],
+                          [str(message_path), "18446744073709551616", "8"],
+                          [str(message_path.with_name("no_existe.txt")), "0", "8"]]:
+            run_program(base_command + arguments, successful=False)
+        for invalid_text in ["", "Mensaje sin la frase requerida", "a" * 4097]:
+            message_path.write_text(invalid_text, encoding="utf-8")
+            run_program(base_command + [str(message_path), "0", "8"], successful=False)
+        maximum_message = "x" * (4096 - len("es una prueba de")) + "es una prueba de"
+        message_path.write_text(maximum_message, encoding="utf-8")
+        verify_search(base_command + [str(message_path), "7", "3"],
+                      7, maximum_message, 8)
+    print("OK: MPI por bloques, archivos, frase, limite de 4096 bytes y errores.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin-dir", type=Path, default=Path("build/bin"))
-    parser.add_argument("--mpi", action="store_true")
+    mpi_modes = parser.add_mutually_exclusive_group()
+    mpi_modes.add_argument("--mpi", action="store_true")
+    mpi_modes.add_argument("--mpi-blocks", action="store_true")
     parser.add_argument("--mpiexec", default="mpirun")
     options = parser.parse_args()
     binary_directory = options.bin_dir.resolve()
@@ -42,7 +79,9 @@ def main():
         ["18446744073709551616"], ["2", "4"], ["2", "-1"],
         ["2", "0", ""], ["2", "0", "a" * 257], ["2", "0", "a", "extra"],
     ]
-    if options.mpi:
+    if options.mpi_blocks:
+        check_mpi_blocks(binary_directory, shlex.split(options.mpiexec))
+    elif options.mpi:
         executable = str(binary_directory / "aes_search_mpi")
         launcher = shlex.split(options.mpiexec)
         # Incluye ranks sin trabajo, reparto desigual, varias rondas y rank ganador != 0.

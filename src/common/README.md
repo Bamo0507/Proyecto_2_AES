@@ -1,9 +1,10 @@
 # Módulos compartidos
 
 Esta carpeta reúne las operaciones que utilizan tanto la búsqueda secuencial CTR
-como la distribuida con MPI. Cada ejecutable define el recorrido de candidatas,
-la medición del tiempo y su forma de terminar ante un error. La referencia ECB
-se mantiene independiente.
+como la distribuida cíclica con MPI. La variante por bloques desde archivo conserva
+la implementación independiente de los ejercicios 1 y 2. Cada ejecutable define
+el recorrido de candidatas, la medición del tiempo y su forma de terminar ante
+un error. La referencia ECB se mantiene independiente.
 
 | Módulo | Responsabilidad | Datos principales |
 | --- | --- | --- |

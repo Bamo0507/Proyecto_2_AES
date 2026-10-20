@@ -12,7 +12,7 @@ para reutilizar el código común.
 | Ruta | Contenido |
 | --- | --- |
 | `src/sequential/` | Implementaciones secuenciales, incluida la versión original como referencia. |
-| `src/distributed/` | Implementaciones de memoria distribuida con MPI. |
+| `src/distributed/` | Implementaciones MPI: reparto cíclico y búsqueda por bloques desde archivo. |
 | `src/common/` | Código compartido entre las implementaciones. |
 | `tests/` | Pruebas para verificar el funcionamiento del código. |
 | `scripts/` | Scripts de apoyo para automatizar tareas del proyecto. |

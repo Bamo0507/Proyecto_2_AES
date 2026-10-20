@@ -27,12 +27,13 @@ COMMON_SOURCES = src/common/aes_ctr.c src/common/search_options.c src/common/sea
 COMMON_OBJECTS = $(patsubst src/%.c,$(BUILD_DIR)/obj/%.o,$(COMMON_SOURCES))
 SEQUENTIAL_OBJECTS = $(BUILD_DIR)/obj/sequential/aes_search_ecb.o $(BUILD_DIR)/obj/sequential/aes_search_ctr.o
 MPI_OBJECT = $(BUILD_DIR)/obj/distributed/aes_search_mpi.o
+MPI_BLOCKS_OBJECT = $(BUILD_DIR)/obj/distributed/aes_search_mpi_blocks.o
 TEST_OBJECT = $(BUILD_DIR)/obj/tests/test_common.o
 
-.PHONY: all sequential mpi test test-mpi check clean print-config
+.PHONY: all sequential mpi test test-mpi test-mpi-blocks check clean print-config
 all: sequential mpi
 sequential: $(BUILD_DIR)/bin/aes_search_ecb $(BUILD_DIR)/bin/aes_search_ctr
-mpi: $(BUILD_DIR)/bin/aes_search_mpi
+mpi: $(BUILD_DIR)/bin/aes_search_mpi $(BUILD_DIR)/bin/aes_search_mpi_blocks
 
 $(BUILD_DIR)/bin/aes_search_ecb: $(BUILD_DIR)/obj/sequential/aes_search_ecb.o
 	@mkdir -p $(@D)
@@ -45,6 +46,14 @@ $(BUILD_DIR)/bin/aes_search_ctr: $(BUILD_DIR)/obj/sequential/aes_search_ctr.o $(
 $(BUILD_DIR)/bin/aes_search_mpi: $(MPI_OBJECT) $(COMMON_OBJECTS)
 	@mkdir -p $(@D)
 	$(MPICC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(BUILD_DIR)/bin/aes_search_mpi_blocks: $(MPI_BLOCKS_OBJECT)
+	@mkdir -p $(@D)
+	$(MPICC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(MPI_BLOCKS_OBJECT): src/distributed/aes_search_mpi_blocks.c
+	@mkdir -p $(@D)
+	$(MPICC) $(COMPILE_FLAGS) -c $< -o $@
 
 $(MPI_OBJECT): src/distributed/aes_search_mpi.c
 	@mkdir -p $(@D)
@@ -69,7 +78,10 @@ test: sequential $(BUILD_DIR)/bin/test_common
 test-mpi: mpi
 	$(PYTHON) tests/check_cli.py --bin-dir $(BUILD_DIR)/bin --mpi --mpiexec "$(MPIEXEC)"
 
-check: test test-mpi
+test-mpi-blocks: mpi
+	$(PYTHON) tests/check_cli.py --bin-dir $(BUILD_DIR)/bin --mpi-blocks --mpiexec "$(MPIEXEC)"
+
+check: test test-mpi test-mpi-blocks
 
 print-config:
 	@echo 'CC=$(CC)'
@@ -84,4 +96,4 @@ print-config:
 clean:
 	rm -rf $(BUILD_DIR)/bin $(BUILD_DIR)/obj
 
--include $(COMMON_OBJECTS:.o=.d) $(SEQUENTIAL_OBJECTS:.o=.d) $(MPI_OBJECT:.o=.d) $(TEST_OBJECT:.o=.d)
+-include $(COMMON_OBJECTS:.o=.d) $(SEQUENTIAL_OBJECTS:.o=.d) $(MPI_OBJECT:.o=.d) $(MPI_BLOCKS_OBJECT:.o=.d) $(TEST_OBJECT:.o=.d)
