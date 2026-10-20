@@ -75,7 +75,7 @@ int main(int argument_count, char *arguments[])
                                                    process_rank, process_count);
     if (process_rank == 0) {
         if (!file_search_report(&aes_context, &search_options, &search_problem, &search_result.summary,
-                                  "hibrida: secuencial + permutacion", process_count)) {
+                                  "hibrida: secuencial + permutacion", 1, process_count)) {
             mpi_file_search_abort("No se pudo descifrar el resultado hibrido.", process_rank);
         }
         printf("k: %" PRIu64 "\nSemilla: %" PRIu64 "\n", sequential_trials_per_turn, seed);

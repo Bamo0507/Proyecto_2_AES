@@ -16,7 +16,8 @@ varias versiones se reúnen en una misma carpeta para evitar repetirlas.
 | `src/common/` | Funciones que comparten las versiones, como cifrar un mensaje o revisar una posible clave. |
 | `tests/` | Pruebas para comprobar que los programas funcionan como esperamos. |
 | `scripts/` | Programas de apoyo para repetir pruebas y guardar sus resultados. |
-| `docs/` | Explicaciones, propuestas y diagramas del proyecto. |
+| `guides/` | Guías compartidas para organizar el código y medir las búsquedas. |
+| `docs/` | Planes, propuestas y diagramas locales que se mantienen fuera de Git. |
 | `results/` | Resultados de las pruebas y comparaciones. |
 | `build/` | Archivos que se crean al preparar los programas para ejecutarlos. |
 | `Makefile` | Instrucciones para preparar los programas y ejecutar las pruebas. |

@@ -1,6 +1,6 @@
 /*
- * Lee y prepara el mensaje que comparten las búsquedas por bloques e híbrida, y
- * comprueba las claves que van probando.
+ * Lee y prepara el mensaje que comparten las búsquedas de archivos, y comprueba
+ * las claves que van probando las versiones secuencial, por bloques e híbrida.
  */
 #ifndef AES_FILE_SEARCH_H
 #define AES_FILE_SEARCH_H
@@ -59,8 +59,8 @@ void file_search_make_key(uint64_t candidate,
 /*
  * Lee el archivo y revisa que contenga la frase de búsqueda. Prepara un dato de
  * inicio nuevo, cifra el mensaje y lo guarda en search_problem. aes_context
- * debe estar abierto y search_options debe haberse revisado. Solo lo hace el
- * trabajador 0.
+ * debe estar abierto y search_options debe haberse revisado. En MPI solo lo
+ * hace el trabajador 0; la versión secuencial lo hace antes de buscar.
  *
  * Quita los saltos de línea finales y muestra el texto original, cifrado y
  * recuperado. Devuelve 1 si termina bien y 0 si falla la lectura, la revisión o
@@ -112,16 +112,16 @@ void file_search_block_bounds(uint64_t total_candidates, int process_count,
  * Muestra las claves probadas, el tiempo y el mensaje recuperado de las
  * versiones que leen un archivo. Recibe aes_context abierto, search_options y
  * search_problem del mismo ejercicio, y search_result después de reunir las
- * mediciones. approach es el nombre de la versión y process_count la cantidad
- * de trabajadores.
+ * mediciones. approach es el nombre de la versión, is_distributed_search indica
+ * si se usa MPI y process_count la cantidad de trabajadores.
  *
- * Solo se llama desde el trabajador 0, fuera del tiempo medido. Devuelve 0 si
- * falla el descifrado final y 1 en los demás casos. No revisa errores de
- * impresión.
+ * En MPI solo se llama desde el trabajador 0. Se usa fuera del tiempo medido.
+ * Devuelve 0 si falla el descifrado final y 1 en los demás casos. No revisa
+ * errores de impresión.
  */
 int file_search_report(AesCtrContext *aes_context, const FileSearchOptions *search_options,
                        const FileSearchProblem *search_problem,
                        const FileSearchResult *search_result, const char *approach,
-                       int process_count);
+                       int is_distributed_search, int process_count);
 
 #endif

@@ -9,8 +9,8 @@
 #include <stdlib.h>
 
 enum { HYBRID_REPORT_TAG = 31, HYBRID_STOP_TAG = 32 };
-/* Revisa si hay avisos después de como máximo 256 pruebas. */
-#define HYBRID_PROGRESS_INTERVAL 256
+/* El límite incluye los cálculos para descartar claves repetidas o volver al grupo. */
+#define HYBRID_CALCULATIONS_PER_CHECK UINT64_C(256)
 
 typedef struct {
     HybridOrder search_order;
@@ -24,10 +24,17 @@ typedef struct {
 static void search_local_chunk(AesCtrContext *aes_context, const FileSearchProblem *search_problem,
                                LocalHybridSearch *local_search, int process_rank)
 {
-    for (int trial = 0; trial < HYBRID_PROGRESS_INTERVAL && !local_search->finished; trial++) {
+    uint64_t calculations_remaining = HYBRID_CALCULATIONS_PER_CHECK;
+    while (calculations_remaining > 0 && !local_search->finished) {
         uint64_t candidate_position;
         HybridCandidateSource candidate_source;
-        if (!hybrid_order_next(&local_search->search_order, &candidate_position, &candidate_source)) {
+        HybridOrderStatus order_status = hybrid_order_next(
+            &local_search->search_order, &calculations_remaining,
+            &candidate_position, &candidate_source);
+        if (order_status == HYBRID_ORDER_PAUSED) {
+            break;
+        }
+        if (order_status == HYBRID_ORDER_FINISHED) {
             local_search->finished = 1;
             break;
         }
@@ -111,9 +118,9 @@ static uint64_t search_as_coordinator(AesCtrContext *aes_context,
                    MPI_COMM_WORLD, &stop_requests[destination_rank - 1]);
     }
     /*
- * * Puede quedar un aviso en camino cuando se ordena parar. Recibir los que *
- * faltan permite que sus remitentes terminen de enviarlos.
- */
+     * Puede quedar un aviso en camino cuando se ordena parar. Recibir los que
+     * faltan permite que sus remitentes terminen de enviarlos.
+     */
     while (reports_received < process_count - 1) {
         uint64_t ignored_candidate;
         MPI_Recv(&ignored_candidate, 1, MPI_UINT64_T, MPI_ANY_SOURCE,

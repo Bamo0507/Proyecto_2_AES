@@ -73,9 +73,9 @@ int search_options_parse(int argument_count, char *arguments[],
     search_options->unknown_key_bits = (int)unknown_bits_argument;
     search_options->total_candidates = UINT64_C(1) << search_options->unknown_key_bits;
     /*
- * * Se usa la última clave como punto de partida para un caso que recorra todo
- * * el conjunto, salvo coincidencias accidentales.
- */
+     * Se usa la última clave como punto de partida para un caso que recorra
+     * todo el conjunto, salvo coincidencias accidentales.
+     */
     search_options->secret_candidate = search_options->total_candidates - 1;
     if (argument_count > 2 &&
         !search_parse_unsigned_decimal(arguments[2], &search_options->secret_candidate)) {

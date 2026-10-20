@@ -80,9 +80,9 @@ int aes_ctr_transform_buffer(AesCtrContext *aes_context,
     int bytes_written = 0;
     int final_bytes_written = 0;
     /*
- * * Con CTR se siguen los mismos pasos para cifrar y descifrar. Si uno falla, *
- * no se continúa con los siguientes.
- */
+     * Con CTR se siguen los mismos pasos para cifrar y descifrar. Si uno falla,
+     * no se continúa con los siguientes.
+     */
     if (EVP_CipherInit_ex(aes_context->cipher_context, aes_context->cipher, NULL,
                          key, initialization_vector, 1) != 1 ||
         EVP_CipherUpdate(aes_context->cipher_context, output, &bytes_written,

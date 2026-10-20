@@ -15,6 +15,9 @@ Las versiones por bloques e híbrida comparten la lectura del archivo, el cifrad
 y la comprobación de las claves. Así podemos comparar sus formas de buscar con
 el mismo tipo de ejercicio.
 
+La [versión secuencial de archivos](../sequential/README.md) comparte esas mismas
+operaciones y sirve como referencia para calcular speedup y eficiencia.
+
 Cada programa tiene su archivo `.c` con el mismo nombre. Los pasos compartidos
 están en estas otras partes:
 
@@ -56,10 +59,15 @@ El trabajador 0 lee el archivo, cifra el mensaje y comparte los datos necesarios
 para probar las claves. La respuesta correcta solo se usa al preparar ese
 mensaje.
 
-Durante la búsqueda, cada trabajador revisa si recibió un aviso de parada, como
-máximo después de 256 pruebas. Cuando encuentra una coincidencia o termina su
-grupo, se lo informa al trabajador 0. Si ya no tiene claves, espera el resultado
-de los demás.
+Durante la búsqueda, cada trabajador revisa si recibió un aviso de parada tras
+una tanda de hasta 256 cálculos del recorrido. El límite cuenta también el
+trabajo de descartar claves repetidas y de recalcular una posición que quedó
+fuera del grupo. Si se agota la tanda, guarda el cálculo pendiente para revisar
+los avisos y continuar desde allí. La pausa conserva el orden de las claves y
+no se cuenta como una prueba de clave.
+
+Cuando encuentra una coincidencia o termina su grupo, se lo informa al trabajador
+0. Si ya no tiene claves, espera el resultado de los demás.
 
 El trabajador 0 avisa a todos cuando hay una coincidencia o cuando todos
 terminaron sin encontrarla. Enviar el aviso no obliga a esperar en ese instante;
@@ -106,12 +114,16 @@ python3 scripts/compare_distributed.py --bits 20 --key 1048575 --processes 4 --r
 ```
 
 La comparación hace primero una ejecución de preparación y luego repite cada
-variante. Guarda los tiempos, las claves probadas, los datos de la máquina y las
-salidas completas en `results/runs/`. El archivo CSV es una tabla que se puede
-abrir en una hoja de cálculo.
+variante, incluida la referencia secuencial. Guarda los tiempos, las claves
+probadas, los datos de la máquina y las salidas completas en `results/runs/`.
+`measurements.csv` contiene cada medición y `summary.csv` reúne las medianas,
+el speedup y la eficiencia. Son tablas que se pueden abrir en una hoja de cálculo.
 
 Cada repetición usa el mismo mensaje, clave y cantidad de trabajadores, y la
 misma semilla para la variante híbrida. El dato de inicio del cifrado se genera
 de nuevo en cada ejecución. Conviene probar varias claves y semillas antes de
 elegir `k`, porque una búsqueda corta por sí sola no permite decidir cuál
 funcionará mejor en general.
+
+La [guía de medición](../../guides/benchmark_methodology.md) explica cómo hacer
+la comparación y cómo omitir la referencia secuencial cuando tardaría demasiado.

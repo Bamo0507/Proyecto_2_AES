@@ -1,5 +1,6 @@
-"""Compara la búsqueda por grupos de claves con la variante que combina
-pruebas consecutivas y tiros revueltos, usando k=8,16,32.
+"""Compara la búsqueda secuencial de archivos, la búsqueda por grupos de claves
+y la variante híbrida con k=8,16,32. Calcula speedup y eficiencia usando la
+mediana del tiempo secuencial como referencia.
 
 Ejemplo desde la raíz:
 python3 scripts/compare_distributed.py --bits 20 --key 1048575 --processes 4
@@ -50,8 +51,9 @@ def run_measurement(command, log_path, expected_key, timeout):
                                     text=True, timeout=timeout)
     log_path.write_text(process_result.stdout, encoding="utf-8")
     if process_result.returncode != 0:
-        raise RuntimeError(f"Fallo MPI; revisar {log_path}")
-    found_candidate_match = re.search(r"Clave encontrada: candidata (\d+) ", process_result.stdout)
+        raise RuntimeError(f"Fallo la busqueda; revisar {log_path}")
+    found_candidate_match = re.search(r"^Clave encontrada: candidata (\d+)(?: |$)",
+                                      process_result.stdout, re.MULTILINE)
     if found_candidate_match is None or int(found_candidate_match.group(1)) != expected_key:
         raise RuntimeError(f"La busqueda no recupero la clave esperada: {log_path}")
     elapsed_seconds = float(read_metric(process_result.stdout, "Tiempo"))
@@ -72,6 +74,8 @@ def main():
     parser.add_argument("--seed", type=unsigned_integer, default=1)
     parser.add_argument("--mpiexec", default=os.environ.get("MPIEXEC", "mpirun"))
     parser.add_argument("--timeout", type=positive_integer, default=120)
+    parser.add_argument("--skip-sequential", action="store_true",
+                        help="Compara solo MPI cuando la busqueda secuencial seria demasiado larga.")
     command_options = parser.parse_args()
     if command_options.bits > 56:
         parser.error("bits debe estar en 1..56.")
@@ -92,7 +96,7 @@ def main():
     ))
     build_directory = run_directory / "build"
     with (run_directory / "build.log").open("w") as build_log:
-        subprocess.run(["make", "-j4", f"BUILD_DIR={build_directory}", "mpi"],
+        subprocess.run(["make", "-j4", f"BUILD_DIR={build_directory}", "all"],
                        cwd=project_directory, stdout=build_log, stderr=subprocess.STDOUT,
                        check=True)
     metadata = {
@@ -102,6 +106,7 @@ def main():
         "message_sha256": hashlib.sha256(message_bytes).hexdigest(),
         "platform": platform.platform(), "logical_cpu_count": os.cpu_count(),
         "mpiexec": command_options.mpiexec,
+        "includes_sequential": not command_options.skip_sequential,
         "note": "Cada ejecucion genera su propio IV; se comparan dimensiones y recorrido.",
     }
     for name, command in {
@@ -118,15 +123,18 @@ def main():
         json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (run_directory / "message.bin").write_bytes(message_bytes)
     with tarfile.open(run_directory / "source.tar.gz", "w:gz") as source_archive:
-        for name in ["Makefile", "README.md", "src", "scripts", "tests"]:
+        for name in ["Makefile", "README.md", "src", "scripts", "tests", "guides"]:
             source_archive.add(project_directory / name, arcname=name)
     mpi_launcher = shlex.split(command_options.mpiexec) + ["-np", str(command_options.processes)]
-    variants = [("blocks", 0)] + [("hybrid", value) for value in dict.fromkeys(command_options.k)]
+    variants = ([] if command_options.skip_sequential else [("sequential", 0)])
+    variants += [("blocks", 0)] + [("hybrid", value) for value in dict.fromkeys(command_options.k)]
     variant_commands = {}
     for approach, sequential_trials_per_turn in variants:
-        binary_name = "aes_search_mpi_blocks" if approach == "blocks" else "aes_search_mpi_hybrid"
-        command = mpi_launcher + [str(build_directory / "bin" / binary_name), str(message_path),
-                                  str(secret_candidate), str(command_options.bits)]
+        binary_name = {"sequential": "aes_search_file", "blocks": "aes_search_mpi_blocks",
+                       "hybrid": "aes_search_mpi_hybrid"}[approach]
+        command = [] if approach == "sequential" else mpi_launcher.copy()
+        command += [str(build_directory / "bin" / binary_name), str(message_path),
+                    str(secret_candidate), str(command_options.bits)]
         if approach == "hybrid":
             command += [str(sequential_trials_per_turn), str(command_options.seed)]
         variant_commands[(approach, sequential_trials_per_turn)] = command
@@ -134,7 +142,7 @@ def main():
                         secret_candidate, command_options.timeout)
 
     measurements = []
-    csv_columns = ["approach", "k", "repetition", "seconds", "candidates",
+    csv_columns = ["approach", "k", "processes", "repetition", "seconds", "candidates",
                    "sequential_candidates", "permuted_candidates"]
     with (run_directory / "measurements.csv").open("w", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=csv_columns)
@@ -150,9 +158,9 @@ def main():
                     run_directory / f"{approach}_{sequential_trials_per_turn}_{repetition + 1}.log",
                     secret_candidate, command_options.timeout,
                 )
-                sequential_candidates = (candidates_tested if approach == "blocks"
+                sequential_candidates = (candidates_tested if approach != "hybrid"
                                          else int(read_metric(output, "Candidatas secuenciales")))
-                permuted_candidates = (0 if approach == "blocks"
+                permuted_candidates = (0 if approach != "hybrid"
                                        else int(read_metric(output, "Candidatas permutadas")))
                 if (sequential_candidates + permuted_candidates != candidates_tested
                         or candidates_tested > (1 << command_options.bits)):
@@ -160,6 +168,7 @@ def main():
                 measurement = {
                     "approach": approach,
                     "k": sequential_trials_per_turn,
+                    "processes": 1 if approach == "sequential" else command_options.processes,
                     "repetition": repetition + 1,
                     "seconds": elapsed_seconds,
                     "candidates": candidates_tested,
@@ -169,15 +178,40 @@ def main():
                 writer.writerow(measurement)
                 csv_file.flush()
                 measurements.append(measurement)
-    print("Variante | k | Mediana (s) | Candidatas (mediana)")
+    summaries = []
     for approach, sequential_trials_per_turn in variants:
         variant_measurements = [
             measurement for measurement in measurements
             if measurement["approach"] == approach and measurement["k"] == sequential_trials_per_turn
         ]
-        print(f"{approach} | {sequential_trials_per_turn or '-'} | "
-              f"{statistics.median(measurement['seconds'] for measurement in variant_measurements):.6f} | "
-              f"{statistics.median(measurement['candidates'] for measurement in variant_measurements):.0f}")
+        summaries.append({
+            "approach": approach,
+            "k": sequential_trials_per_turn,
+            "processes": 1 if approach == "sequential" else command_options.processes,
+            "median_seconds": statistics.median(measurement["seconds"] for measurement in variant_measurements),
+            "median_candidates": statistics.median(measurement["candidates"] for measurement in variant_measurements),
+        })
+    sequential_seconds = next((summary["median_seconds"] for summary in summaries
+                               if summary["approach"] == "sequential"), None)
+    summary_columns = ["approach", "k", "processes", "median_seconds", "median_candidates",
+                       "speedup", "efficiency"]
+    print("Variante | k | Mediana (s) | Candidatas (mediana) | Speedup | Eficiencia")
+    with (run_directory / "summary.csv").open("w", newline="") as summary_file:
+        writer = csv.DictWriter(summary_file, fieldnames=summary_columns)
+        writer.writeheader()
+        for summary in summaries:
+            # Sin una medición secuencial no se puede calcular esta comparación.
+            summary["speedup"] = (sequential_seconds / summary["median_seconds"]
+                                  if sequential_seconds is not None else None)
+            summary["efficiency"] = (summary["speedup"] / summary["processes"]
+                                     if summary["speedup"] is not None else None)
+            writer.writerow(summary)
+            speedup_text = f"{summary['speedup']:.3f}" if summary["speedup"] is not None else "sin referencia"
+            efficiency_text = (f"{100 * summary['efficiency']:.1f}%"
+                               if summary["efficiency"] is not None else "sin referencia")
+            print(f"{summary['approach']} | {summary['k'] or '-'} | "
+                  f"{summary['median_seconds']:.6f} | {summary['median_candidates']:.0f} | "
+                  f"{speedup_text} | {efficiency_text}")
     print(f"Resultados: {run_directory}")
 
 

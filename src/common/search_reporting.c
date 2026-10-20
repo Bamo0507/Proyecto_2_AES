@@ -27,9 +27,9 @@ int search_report(AesCtrContext *aes_context, const SearchOptions *search_option
     unsigned char found_key[AES_KEY_LENGTH];
     unsigned char decrypted_message[AES_OUTPUT_CAPACITY];
     /*
- * * Primero descifra para no mostrar un resultado incompleto si el cifrado *
- * falla. Este paso queda fuera del tiempo de búsqueda.
- */
+     * Primero descifra para no mostrar un resultado incompleto si el cifrado
+     * falla. Este paso queda fuera del tiempo de búsqueda.
+     */
     if (search_result->found_candidate != AES_CANDIDATE_NOT_FOUND) {
         aes_ctr_make_candidate_key(search_problem->base_key, search_result->found_candidate,
                                    search_options->unknown_key_bits, found_key);

@@ -25,9 +25,11 @@ LDLIBS += $(OPENSSL_LDLIBS)
 COMPILE_FLAGS = $(CPPFLAGS) $(C_STANDARD) $(CFLAGS) $(WARNINGS) -MMD -MP
 COMMON_SOURCES = src/common/aes_ctr.c src/common/search_options.c \
                  src/common/search_reporting.c src/common/file_search.c \
-                 src/common/hybrid_order.c
+                 src/common/hybrid_order.c src/common/search_timing.c
 COMMON_OBJECTS = $(patsubst src/%.c,$(BUILD_DIR)/obj/%.o,$(COMMON_SOURCES))
-SEQUENTIAL_OBJECTS = $(BUILD_DIR)/obj/sequential/aes_search_ecb.o $(BUILD_DIR)/obj/sequential/aes_search_ctr.o
+SEQUENTIAL_OBJECTS = $(BUILD_DIR)/obj/sequential/aes_search_ecb.o \
+                     $(BUILD_DIR)/obj/sequential/aes_search_ctr.o \
+                     $(BUILD_DIR)/obj/sequential/aes_search_file.o
 MPI_OBJECT = $(BUILD_DIR)/obj/distributed/aes_search_mpi.o
 MPI_BLOCKS_OBJECT = $(BUILD_DIR)/obj/distributed/aes_search_mpi_blocks.o
 MPI_HYBRID_OBJECT = $(BUILD_DIR)/obj/distributed/aes_search_mpi_hybrid.o
@@ -41,7 +43,8 @@ HYBRID_MPI_TEST_OBJECT = $(BUILD_DIR)/obj/tests/test_hybrid_mpi.o
 
 .PHONY: all sequential mpi test test-mpi test-mpi-blocks test-mpi-hybrid check clean print-config
 all: sequential mpi
-sequential: $(BUILD_DIR)/bin/aes_search_ecb $(BUILD_DIR)/bin/aes_search_ctr
+sequential: $(BUILD_DIR)/bin/aes_search_ecb $(BUILD_DIR)/bin/aes_search_ctr \
+            $(BUILD_DIR)/bin/aes_search_file
 mpi: $(BUILD_DIR)/bin/aes_search_mpi $(BUILD_DIR)/bin/aes_search_mpi_blocks \
      $(BUILD_DIR)/bin/aes_search_mpi_hybrid
 
@@ -50,6 +53,10 @@ $(BUILD_DIR)/bin/aes_search_ecb: $(BUILD_DIR)/obj/sequential/aes_search_ecb.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 $(BUILD_DIR)/bin/aes_search_ctr: $(BUILD_DIR)/obj/sequential/aes_search_ctr.o $(COMMON_OBJECTS)
+	@mkdir -p $(@D)
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(BUILD_DIR)/bin/aes_search_file: $(BUILD_DIR)/obj/sequential/aes_search_file.o $(COMMON_OBJECTS)
 	@mkdir -p $(@D)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 

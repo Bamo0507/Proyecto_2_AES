@@ -71,7 +71,7 @@ make BUILD_DIR="$benchmark_build_directory" all > "$run_directory/build.log" 2>&
 } > "$run_directory/metadata.txt" 2>&1
 
 # Guarda una copia del código usado, incluidos los archivos nuevos que aún no están en Git.
-tar -czf "$run_directory/source.tar.gz" Makefile src scripts docs/coding_conventions.md docs/benchmark_methodology.md
+tar -czf "$run_directory/source.tar.gz" Makefile src scripts guides
 
 # Hace una primera ejecución de preparación que no se cuenta entre las mediciones.
 "$benchmark_build_directory/bin/aes_search_ctr" "$benchmark_bits" > "$run_directory/warmup_sequential.log" 2>&1

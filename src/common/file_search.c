@@ -1,6 +1,6 @@
 /*
  * Lee el mensaje del archivo y comparte las operaciones de cifrado y revisión
- * de claves entre las versiones por bloques e híbrida.
+ * de claves entre las versiones secuencial, por bloques e híbrida.
  */
 #include "file_search.h"
 
@@ -165,7 +165,7 @@ void file_search_block_bounds(uint64_t total_candidates, int process_count,
 int file_search_report(AesCtrContext *aes_context, const FileSearchOptions *search_options,
                        const FileSearchProblem *search_problem,
                        const FileSearchResult *search_result, const char *approach,
-                       int process_count)
+                       int is_distributed_search, int process_count)
 {
     unsigned char found_key[AES_KEY_LENGTH];
     unsigned char decrypted_message[FILE_SEARCH_OUTPUT_CAPACITY];
@@ -174,12 +174,19 @@ int file_search_report(AesCtrContext *aes_context, const FileSearchOptions *sear
                                        search_result->found_candidate, decrypted_message)) {
         return 0;
     }
-    printf("Ejecucion: paralela con %d procesos (%s)\n", process_count, approach);
+    if (is_distributed_search) {
+        printf("Ejecucion: paralela con %d procesos (%s)\n", process_count, approach);
+    } else {
+        printf("Ejecucion: secuencial\n");
+    }
     printf("Rango explorado: 2^%d candidatas\n", search_options->unknown_key_bits);
     printf("Frase de busqueda: \"%s\"\n", FILE_SEARCH_PHRASE);
     if (search_result->found_candidate != AES_CANDIDATE_NOT_FOUND) {
-        printf("Clave encontrada: candidata %" PRIu64 " (proceso %d)\n",
-               search_result->found_candidate, search_result->winning_rank);
+        printf("Clave encontrada: candidata %" PRIu64, search_result->found_candidate);
+        if (is_distributed_search) {
+            printf(" (proceso %d)", search_result->winning_rank);
+        }
+        putchar('\n');
         file_search_make_key(search_result->found_candidate, found_key);
         printf("Clave AES-128: ");
         print_hexadecimal(found_key, AES_KEY_LENGTH);

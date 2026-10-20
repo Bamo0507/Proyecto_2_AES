@@ -15,8 +15,9 @@ del conjunto de claves.
 | `search_options` | Revisa los datos que se escriben al iniciar `aes_search_ctr` y `aes_search_mpi`, como la cantidad de claves y el mensaje. |
 | `aes_ctr` | Cifra y descifra mensajes con ayuda de OpenSSL, una biblioteca de cifrado. También construye las claves que se van a probar. |
 | `search_reporting` | Muestra la posible clave encontrada, el mensaje recuperado y el tiempo de búsqueda de `aes_search_ctr` y `aes_search_mpi`. |
-| `file_search` | Lee el archivo de entrada y comprueba si una clave recupera la frase `es una prueba de`. Lo comparten las versiones por bloques e híbrida. |
+| `file_search` | Lee el archivo de entrada y comprueba si una clave recupera la frase `es una prueba de`. Lo comparten la secuencial de archivos y las versiones MPI por bloques e híbrida. |
 | `hybrid_order` | Decide qué clave probar después en la versión híbrida, alternando claves consecutivas con otras tomadas en un orden diferente. Evita repetir pruebas. |
+| `search_timing` | Consulta el mismo reloj para medir las búsquedas secuenciales que comparten módulos. |
 
 Cada nombre corresponde a dos archivos. El `.h` explica qué ofrece esa parte y
 cómo usarla. El `.c` contiene los pasos que realizan el trabajo.
@@ -34,14 +35,18 @@ muestra el resultado.
 Hay dos formas de comprobar una candidata. `aes_search_ctr` y `aes_search_mpi` comparan
 hasta los primeros ocho bytes del mensaje, es decir, una pequeña parte de su
 inicio. Si esa parte es muy corta, más de una clave puede producir una
-coincidencia. Las versiones por bloques e híbrida descifran el mensaje completo y
-buscan la frase `es una prueba de` en cualquier posición.
+coincidencia. La secuencial de archivos y las versiones MPI por bloques e híbrida
+descifran el mensaje completo y buscan la frase `es una prueba de` en cualquier
+posición.
 
 En la versión híbrida, `k` indica cuántas claves consecutivas se prueban antes de
 hacer un intento en otro orden. Por ejemplo, con `k=8` se hacen ocho pruebas en
 orden y luego una de las llamadas «tiros revueltos» en la propuesta. Un número
 llamado semilla permite volver a generar el mismo orden. Se omiten las claves
 que ya se habían probado por cualquiera de los dos caminos.
+
+El recorrido puede pausar un cálculo para que se revisen los avisos de parada.
+Conserva su avance y, al retomarlo, entrega las claves en el mismo orden.
 
 Los tamaños del mensaje se miden en bytes, la unidad usada para contar su espacio
 en memoria. Las versiones que comparan el inicio aceptan hasta 256 bytes y las que leen un

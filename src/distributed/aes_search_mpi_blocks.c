@@ -39,9 +39,9 @@ static FileSearchResult search_blocks(AesCtrContext *aes_context,
     MPI_Barrier(MPI_COMM_WORLD);
     double start_seconds = MPI_Wtime();
     /*
- * * Todos revisan las mismas rondas, incluidos quienes ya no tienen claves, *
- * para evitar esperas sin fin.
- */
+     * Todos revisan las mismas rondas, incluidos quienes ya no tienen claves,
+     * para evitar esperas sin fin.
+     */
     for (uint64_t candidate_position = 0; candidate_position < block_candidate_count;
          candidate_position += BLOCK_CANDIDATES_PER_ROUND) {
         uint64_t round_first_candidate = first_candidate + candidate_position;
@@ -109,7 +109,7 @@ int main(int argument_count, char *arguments[])
                                              process_rank, process_count);
     if (process_rank == 0 &&
         !file_search_report(&aes_context, &search_options, &search_problem,
-                              &search_result, "bloques", process_count)) {
+                              &search_result, "bloques", 1, process_count)) {
         mpi_file_search_abort("No se pudo descifrar el resultado por bloques.", process_rank);
     }
     aes_ctr_context_close(&aes_context);

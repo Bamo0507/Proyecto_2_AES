@@ -17,6 +17,12 @@ typedef enum {
     HYBRID_PERMUTED
 } HybridCandidateSource;
 
+typedef enum {
+    HYBRID_ORDER_FINISHED,
+    HYBRID_CANDIDATE_READY,
+    HYBRID_ORDER_PAUSED
+} HybridOrderStatus;
+
 typedef struct {
     uint64_t block_candidate_count; /* Cantidad de claves del grupo; puede ser cero. */
     uint64_t permutation_mask; /* Conserva solo los bits que necesita el cálculo del orden. */
@@ -28,6 +34,10 @@ typedef struct {
     uint64_t sequential_trials_per_turn; /* Cantidad de pruebas consecutivas por turno: k. */
     uint64_t sequential_trials_remaining; /* Pruebas consecutivas que faltan en el turno actual. */
     uint64_t candidates_emitted; /* Claves distintas entregadas para probar hasta ahora. */
+    uint64_t pending_position; /* Posición desde la que empezó el cálculo actual. */
+    uint64_t mapped_position; /* Resultado parcial que se conserva al pausar. */
+    HybridCandidateSource pending_source; /* Recorrido que inició ese cálculo. */
+    int mapping_in_progress; /* Indica si hay un cálculo que se debe retomar. */
 } HybridOrder;
 
 /*
@@ -63,14 +73,25 @@ uint64_t hybrid_order_inverse(const HybridOrder *search_order, uint64_t candidat
  * probado y señala en candidate_source cuál de los dos recorridos la eligió.
  * Para obtener el número de clave hay que sumar la primera clave del grupo. Por
  * ejemplo, la posición 3 del grupo que empieza en 100 corresponde a 103.
- * search_order debe estar preparado y se conserva entre llamadas. Devuelve 1 si
- * entregó una posición y 0 cuando se termina el grupo.
+ * search_order debe estar preparado y se conserva entre llamadas.
+ * calculations_remaining indica cuántos cálculos más permite hacer quien
+ * llama. Cada cálculo de una posición consume uno, aunque corresponda a una
+ * clave repetida o haya que calcular de nuevo para volver al grupo.
+ *
+ * Devuelve HYBRID_CANDIDATE_READY si entregó una posición,
+ * HYBRID_ORDER_FINISHED al terminar el grupo y HYBRID_ORDER_PAUSED si se agotó
+ * el saldo. En una pausa conserva el avance, incluido cualquier cálculo a
+ * medias. Se puede revisar si hay avisos y llamar de nuevo con otro saldo.
+ * Solo se escriben selected_position y candidate_source al entregar una clave.
+ * Con saldo cero, si queda trabajo, devuelve una pausa sin avanzar.
  *
  * Cada recorrido salta las claves que el otro ya había probado. k cuenta
  * pruebas nuevas; las posiciones que se saltan no consumen una prueba del
  * turno.
  */
-int hybrid_order_next(HybridOrder *search_order, uint64_t *selected_position,
-                      HybridCandidateSource *candidate_source);
+HybridOrderStatus hybrid_order_next(HybridOrder *search_order,
+                                    uint64_t *calculations_remaining,
+                                    uint64_t *selected_position,
+                                    HybridCandidateSource *candidate_source);
 
 #endif

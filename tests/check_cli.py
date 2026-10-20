@@ -9,6 +9,8 @@ import shlex
 import subprocess
 import tempfile
 
+PROJECT_MESSAGE = "Esta es una prueba de proyecto 2"
+
 
 def run_program(command, successful=True):
     process_result = subprocess.run(command, capture_output=True, text=True, timeout=30)
@@ -34,10 +36,71 @@ def verify_search(command, candidate, message, candidate_count=None):
     return output
 
 
+def verify_hybrid_statistics(output, unknown_bits, process_count, secret_candidate):
+    candidates_tested = int(re.search(r"Candidatas probadas: (\d+)", output).group(1))
+    sequential_candidates = int(re.search(r"Candidatas secuenciales: (\d+)", output).group(1))
+    permuted_candidates = int(re.search(r"Candidatas permutadas: (\d+)", output).group(1))
+    if (candidates_tested != sequential_candidates + permuted_candidates
+            or not 0 < candidates_tested <= (1 << unknown_bits)):
+        raise AssertionError(f"Conteo hibrido invalido:\n{output}")
+    block_size = ((1 << unknown_bits) + process_count - 1) // process_count
+    if f"(proceso {secret_candidate // block_size})" not in output:
+        raise AssertionError(f"Trabajador propietario incorrecto:\n{output}")
+
+
+def check_required_project_cases(executable, mpi_launcher, message_path,
+                                 sequential_trials_per_turn=None):
+    """Comprueba las tres claves del enunciado con cuatro trabajadores y 56 bits."""
+    for secret_candidate in [123456, 18014398509481984, 18014398509481985]:
+        command = mpi_launcher + ["-np", "4", executable, str(message_path),
+                                  str(secret_candidate), "56"]
+        if sequential_trials_per_turn is not None:
+            command += [str(sequential_trials_per_turn), "1"]
+        output = verify_search(command, secret_candidate, PROJECT_MESSAGE)
+        expected_key = secret_candidate.to_bytes(16, "big").hex()
+        if f"Clave AES-128: {expected_key}\n" not in output:
+            raise AssertionError(f"Conversion incorrecta de la clave a 16 bytes:\n{output}")
+        if f"Texto recuperado: {PROJECT_MESSAGE}\n" not in output:
+            raise AssertionError(f"Descifrado inicial incorrecto:\n{output}")
+        if sequential_trials_per_turn is not None:
+            verify_hybrid_statistics(output, 56, 4, secret_candidate)
+        elif f"(proceso {secret_candidate // (1 << 54)})" not in output:
+            raise AssertionError(f"Reparto de las claves del enunciado incorrecto:\n{output}")
+
+
+def check_sequential_file(binary_directory):
+    """La referencia secuencial debe usar el mismo archivo y frase que MPI."""
+    executable = str(binary_directory / "aes_search_file")
+    with tempfile.TemporaryDirectory(prefix="aes-sequential-file-") as directory:
+        message_path = Path(directory) / "mensaje.txt"
+        message_path.write_text(PROJECT_MESSAGE + "\r\n", encoding="utf-8")
+        for unknown_bits, secret_candidate in [(1, 0), (1, 1), (12, 4095), (56, 123456)]:
+            output = verify_search(
+                [executable, str(message_path), str(secret_candidate), str(unknown_bits)],
+                secret_candidate, PROJECT_MESSAGE, secret_candidate + 1,
+            )
+            if "Ejecucion: secuencial\n" not in output:
+                raise AssertionError(f"Tipo de ejecucion incorrecto:\n{output}")
+        verify_search([executable, str(message_path), "0"], 0, PROJECT_MESSAGE, 1)
+        for arguments in [[], [str(message_path)], [str(message_path), "4", "2"],
+                          [str(message_path), "0", "57"],
+                          [str(message_path), "-1", "8"],
+                          [str(message_path), str(1 << 64), "8"],
+                          [str(message_path.with_name("no_existe.txt")), "0", "8"]]:
+            run_program([executable, *arguments], successful=False)
+        for invalid_text in ["", "Mensaje sin la frase requerida", "a" * 4097]:
+            message_path.write_text(invalid_text, encoding="utf-8")
+            run_program([executable, str(message_path), "0", "8"], successful=False)
+        maximum_message = "x" * (4096 - len("es una prueba de")) + "es una prueba de"
+        message_path.write_text(maximum_message, encoding="utf-8")
+        verify_search([executable, str(message_path), "7", "3"], 7, maximum_message, 8)
+    print("OK: referencia secuencial de archivos, frase, 56 bits, limites y errores.")
+
+
 def check_mpi_blocks(binary_directory, mpi_launcher):
     """Comprueba la lectura del archivo y el grupo de claves de cada trabajador."""
     executable = str(binary_directory / "aes_search_mpi_blocks")
-    message = "Esta es una prueba de proyecto 2"
+    message = PROJECT_MESSAGE
     with tempfile.TemporaryDirectory(prefix="aes-mpi-blocks-") as directory:
         message_path = Path(directory) / "mensaje.txt"
         message_path.write_text(message + "\r\n", encoding="utf-8")
@@ -52,6 +115,7 @@ def check_mpi_blocks(binary_directory, mpi_launcher):
         # Probar la clave 0 permite revisar el tamaño inicial de 56 bits sin una búsqueda larga.
         verify_search(mpi_launcher + ["-np", "2", executable, str(message_path), "0"],
                       0, message)
+        check_required_project_cases(executable, mpi_launcher, message_path)
         base_command = mpi_launcher + ["-np", "2", executable]
         for arguments in [[], [str(message_path)], [str(message_path), "4", "2"],
                           [str(message_path), "0", "57"],
@@ -71,7 +135,7 @@ def check_mpi_blocks(binary_directory, mpi_launcher):
 def check_mpi_hybrid(binary_directory, mpi_launcher):
     """Prueba k=8,16,32 y comprueba los avisos que permiten detener la búsqueda."""
     executable = str(binary_directory / "aes_search_mpi_hybrid")
-    message = "Inicio: esta es una prueba de la variante hibrida."
+    message = PROJECT_MESSAGE
     with tempfile.TemporaryDirectory(prefix="aes-mpi-hybrid-") as directory:
         message_path = Path(directory) / "mensaje.txt"
         message_path.write_text(message + "\r\n", encoding="utf-8")
@@ -86,15 +150,9 @@ def check_mpi_hybrid(binary_directory, mpi_launcher):
                                 str(sequential_trials_per_turn), "42"],
                     secret_candidate, message,
                 )
-                candidates_tested = int(re.search(r"Candidatas probadas: (\d+)", output).group(1))
-                sequential_candidates = int(re.search(r"Candidatas secuenciales: (\d+)", output).group(1))
-                permuted_candidates = int(re.search(r"Candidatas permutadas: (\d+)", output).group(1))
-                if (candidates_tested != sequential_candidates + permuted_candidates
-                        or not 0 < candidates_tested <= (1 << unknown_bits)):
-                    raise AssertionError(f"Conteo hibrido invalido:\n{output}")
-                block_size = ((1 << unknown_bits) + process_count - 1) // process_count
-                if f"(proceso {secret_candidate // block_size})" not in output:
-                    raise AssertionError(f"Rank propietario incorrecto:\n{output}")
+                verify_hybrid_statistics(output, unknown_bits, process_count, secret_candidate)
+            check_required_project_cases(executable, mpi_launcher, message_path,
+                                           sequential_trials_per_turn)
         base_command = mpi_launcher + ["-np", "4", executable]
         # Revisa los valores iniciales y los límites de k y la semilla con búsquedas cortas.
         verify_search(base_command + [str(message_path), "0"], 0, message)
@@ -172,6 +230,7 @@ def main():
         for arguments in invalid_arguments:
             run_program([executable, *arguments], successful=False)
         print("OK: referencia ECB, busqueda CTR, limites y argumentos invalidos.")
+        check_sequential_file(binary_directory)
 
 
 main()

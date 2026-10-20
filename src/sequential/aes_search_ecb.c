@@ -149,9 +149,9 @@ int main(void)
     ] = {0};
 
     /*
- * * Usa SECRET_CANDIDATE para crear el mensaje cifrado antes de comenzar la *
- * búsqueda.
- */
+     * Usa SECRET_CANDIDATE para crear el mensaje cifrado antes de comenzar la
+     * búsqueda.
+     */
     crypt_block(cipher_context, SECRET_CANDIDATE, original_message, ciphertext, 1);
 
     uint64_t found_candidate = UINT64_MAX;

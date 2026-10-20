@@ -25,6 +25,8 @@ typedef struct {
  * encuentra una coincidencia o termina su grupo, avisa al trabajador 0. Los que
  * ya terminaron esperan la decisión final; todos completan sus avisos antes de
  * reunir los resultados.
+ * El trabajo se divide en tandas que incluyen los cálculos para saltar claves
+ * repetidas. Entre tandas se revisan los avisos y se retoma el avance guardado.
  *
  * Devuelve la misma clave elegida a todos. Las cantidades sumadas y el tiempo
  * final solo se leen en el trabajador 0. Un fallo que impida continuar detiene

@@ -35,10 +35,10 @@ int hybrid_order_initialize(HybridOrder *search_order, uint64_t block_candidate_
     search_order->sequential_trials_remaining = sequential_trials_per_turn;
 
     /*
- * * Este cálculo permite deshacer el reordenamiento. Cada repetición duplica *
- * la cantidad de bits correctos; seis repeticiones cubren los 64 bits del *
- * número.
- */
+     * Este cálculo permite deshacer el reordenamiento. Cada repetición duplica
+     * la cantidad de bits correctos; seis repeticiones cubren los 64 bits del
+     * número.
+     */
     search_order->inverse_permutation_multiplier = 1;
     for (int iteration = 0; iteration < 6; iteration++) {
         search_order->inverse_permutation_multiplier *=
@@ -47,11 +47,22 @@ int hybrid_order_initialize(HybridOrder *search_order, uint64_t block_candidate_
     return 1;
 }
 
+static uint64_t permute_once(const HybridOrder *search_order, uint64_t position)
+{
+    return (search_order->permutation_multiplier * position +
+            search_order->permutation_shift) & search_order->permutation_mask;
+}
+
+static uint64_t invert_once(const HybridOrder *search_order, uint64_t position)
+{
+    return ((position - search_order->permutation_shift) *
+            search_order->inverse_permutation_multiplier) & search_order->permutation_mask;
+}
+
 uint64_t hybrid_order_permute(const HybridOrder *search_order, uint64_t permutation_index)
 {
     do {
-        permutation_index = (search_order->permutation_multiplier * permutation_index +
-                             search_order->permutation_shift) & search_order->permutation_mask;
+        permutation_index = permute_once(search_order, permutation_index);
     } while (permutation_index >= search_order->block_candidate_count);
     return permutation_index;
 }
@@ -59,43 +70,63 @@ uint64_t hybrid_order_permute(const HybridOrder *search_order, uint64_t permutat
 uint64_t hybrid_order_inverse(const HybridOrder *search_order, uint64_t candidate_position)
 {
     do {
-        candidate_position = ((candidate_position - search_order->permutation_shift) *
-                              search_order->inverse_permutation_multiplier) & search_order->permutation_mask;
+        candidate_position = invert_once(search_order, candidate_position);
     } while (candidate_position >= search_order->block_candidate_count);
     return candidate_position;
 }
 
-int hybrid_order_next(HybridOrder *search_order, uint64_t *selected_position,
-                      HybridCandidateSource *candidate_source)
+HybridOrderStatus hybrid_order_next(HybridOrder *search_order,
+                                    uint64_t *calculations_remaining,
+                                    uint64_t *selected_position,
+                                    HybridCandidateSource *candidate_source)
 {
     if (search_order->candidates_emitted == search_order->block_candidate_count) {
-        return 0;
+        return HYBRID_ORDER_FINISHED;
     }
-    if (search_order->sequential_trials_remaining > 0) {
-        while (search_order->next_sequential_position < search_order->block_candidate_count) {
-            uint64_t candidate_position = search_order->next_sequential_position++;
-            /* Solo se cuenta la prueba si el otro recorrido todavía no pasó por esta clave. */
-            if (hybrid_order_inverse(search_order, candidate_position) >= search_order->next_permutation_index) {
-                search_order->sequential_trials_remaining--;
-                search_order->candidates_emitted++;
-                *selected_position = candidate_position;
-                *candidate_source = HYBRID_SEQUENTIAL;
-                return 1;
+    while (*calculations_remaining > 0) {
+        if (!search_order->mapping_in_progress) {
+            if (search_order->sequential_trials_remaining > 0 &&
+                search_order->next_sequential_position < search_order->block_candidate_count) {
+                search_order->pending_source = HYBRID_SEQUENTIAL;
+                search_order->pending_position = search_order->next_sequential_position++;
+            } else {
+                search_order->sequential_trials_remaining = 0;
+                if (search_order->next_permutation_index == search_order->block_candidate_count) {
+                    return HYBRID_ORDER_FINISHED;
+                }
+                search_order->pending_source = HYBRID_PERMUTED;
+                search_order->pending_position = search_order->next_permutation_index++;
             }
+            search_order->mapped_position = search_order->pending_position;
+            search_order->mapping_in_progress = 1;
         }
-        search_order->sequential_trials_remaining = 0;
-    }
-    while (search_order->next_permutation_index < search_order->block_candidate_count) {
-        uint64_t candidate_position =
-            hybrid_order_permute(search_order, search_order->next_permutation_index++);
-        /* Las posiciones anteriores a este punto ya las cubrió el recorrido consecutivo. */
-        if (candidate_position >= search_order->next_sequential_position) {
+
+        (*calculations_remaining)--;
+        search_order->mapped_position = search_order->pending_source == HYBRID_SEQUENTIAL
+            ? invert_once(search_order, search_order->mapped_position)
+            : permute_once(search_order, search_order->mapped_position);
+        if (search_order->mapped_position >= search_order->block_candidate_count) {
+            continue;
+        }
+        search_order->mapping_in_progress = 0;
+
+        if (search_order->pending_source == HYBRID_SEQUENTIAL) {
+            /* Saltar una clave repetida conserva las pruebas nuevas que faltan en el turno. */
+            if (search_order->mapped_position < search_order->next_permutation_index) {
+                continue;
+            }
+            search_order->sequential_trials_remaining--;
+            *selected_position = search_order->pending_position;
+        } else {
+            if (search_order->mapped_position < search_order->next_sequential_position) {
+                continue;
+            }
             search_order->sequential_trials_remaining = search_order->sequential_trials_per_turn;
-            search_order->candidates_emitted++;
-            *selected_position = candidate_position;
-            *candidate_source = HYBRID_PERMUTED;
-            return 1;
+            *selected_position = search_order->mapped_position;
         }
+        search_order->candidates_emitted++;
+        *candidate_source = search_order->pending_source;
+        return HYBRID_CANDIDATE_READY;
     }
-    return 0;
+    return HYBRID_ORDER_PAUSED;
 }

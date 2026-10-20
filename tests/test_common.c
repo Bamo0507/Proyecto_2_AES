@@ -18,10 +18,10 @@
 int main(void)
 {
     /*
- * * Ejemplo de AES-128-CTR publicado por NIST: se comprueba que salga *
- * exactamente el resultado esperado. *
- * https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_CTR.pdf
- */
+     * Ejemplo de AES-128-CTR publicado por NIST: se comprueba que salga
+     * exactamente el resultado esperado.
+     * https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_CTR.pdf
+     */
     const unsigned char reference_key[AES_KEY_LENGTH] = {
         0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
         0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
@@ -82,9 +82,9 @@ int main(void)
     CHECK(base_key[15] == 0xaa);
 
     /*
- * * Usa datos fijos para comprobar una clave correcta y descartar otra, *
- * repitiendo siempre la misma prueba.
- */
+     * Usa datos fijos para comprobar una clave correcta y descartar otra,
+     * repitiendo siempre la misma prueba.
+     */
     SearchOptions search_options = {8, 256, 123, "abcdefgh", 8, 8};
     AesSearchProblem search_problem = {0};
     memcpy(search_problem.base_key, base_key, AES_KEY_LENGTH);

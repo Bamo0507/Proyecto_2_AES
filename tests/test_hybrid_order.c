@@ -16,6 +16,110 @@
     } \
 } while (0)
 
+static HybridOrderStatus next_after_pauses(HybridOrder *search_order,
+                                          uint64_t calculations_per_call,
+                                          uint64_t *selected_position,
+                                          HybridCandidateSource *candidate_source)
+{
+    HybridOrderStatus order_status;
+    do {
+        uint64_t calculations_remaining = calculations_per_call;
+        order_status = hybrid_order_next(search_order, &calculations_remaining,
+                                          selected_position, candidate_source);
+    } while (order_status == HYBRID_ORDER_PAUSED);
+    return order_status;
+}
+
+static int check_mapping_pauses(void)
+{
+    int paused_while_permuting = 0;
+    int paused_while_inverting = 0;
+    const uint64_t trial_counts[] = {1, UINT64_MAX};
+    /* Cinco claves usan un cálculo de ocho posiciones; algunas quedan fuera del grupo. */
+    for (size_t trial_index = 0; trial_index < sizeof(trial_counts) / sizeof(trial_counts[0]);
+         trial_index++) {
+        HybridOrder search_order;
+        CHECK(hybrid_order_initialize(&search_order, 5, trial_counts[trial_index], 0));
+        unsigned char visited_positions[5] = {0};
+        for (;;) {
+            uint64_t selected_position = UINT64_MAX;
+            HybridCandidateSource candidate_source = HYBRID_PERMUTED;
+            uint64_t previous_count = search_order.candidates_emitted;
+            uint64_t calculations_remaining = 1;
+            HybridOrderStatus order_status = hybrid_order_next(
+                &search_order, &calculations_remaining, &selected_position, &candidate_source);
+            if (order_status == HYBRID_ORDER_FINISHED) {
+                break;
+            }
+            CHECK(calculations_remaining == 0);
+            if (order_status == HYBRID_ORDER_PAUSED) {
+                CHECK(selected_position == UINT64_MAX && candidate_source == HYBRID_PERMUTED);
+                CHECK(search_order.candidates_emitted == previous_count);
+                if (search_order.mapping_in_progress) {
+                    CHECK(search_order.mapped_position >= search_order.block_candidate_count);
+                    if (search_order.pending_source == HYBRID_SEQUENTIAL) {
+                        paused_while_inverting = 1;
+                    } else {
+                        paused_while_permuting = 1;
+                    }
+                }
+                continue;
+            }
+            CHECK(order_status == HYBRID_CANDIDATE_READY);
+            CHECK(selected_position < 5 && !visited_positions[selected_position]);
+            visited_positions[selected_position] = 1;
+        }
+        CHECK(search_order.candidates_emitted == 5);
+    }
+    CHECK(paused_while_permuting && paused_while_inverting);
+    return EXIT_SUCCESS;
+}
+
+static int check_long_skip_pauses(void)
+{
+    HybridOrder search_order;
+    CHECK(hybrid_order_initialize(&search_order, UINT64_C(1) << 20, 8, 0));
+    uint64_t calculations_remaining = 0;
+    uint64_t selected_position = UINT64_MAX;
+    HybridCandidateSource candidate_source = HYBRID_PERMUTED;
+    CHECK(hybrid_order_next(&search_order, &calculations_remaining,
+                             &selected_position, &candidate_source) == HYBRID_ORDER_PAUSED);
+    CHECK(search_order.next_sequential_position == 0 && search_order.next_permutation_index == 0);
+    CHECK(selected_position == UINT64_MAX && candidate_source == HYBRID_PERMUTED);
+
+    /* Con esta semilla, el recorrido revuelto visita un tramo consecutivo más adelante. */
+    uint64_t repeated_start = search_order.permutation_shift;
+    uint64_t repeated_count = repeated_start / 8;
+    uint64_t prefix_count = repeated_start + repeated_count;
+    CHECK(prefix_count < search_order.block_candidate_count && repeated_count > 256);
+    while (search_order.candidates_emitted < prefix_count) {
+        CHECK(next_after_pauses(&search_order, UINT64_MAX,
+                                &selected_position, &candidate_source) == HYBRID_CANDIDATE_READY);
+    }
+    CHECK(search_order.next_sequential_position == repeated_start);
+    CHECK(search_order.next_permutation_index == repeated_count);
+
+    int pause_count = 0;
+    for (;;) {
+        calculations_remaining = 256;
+        uint64_t previous_position = search_order.next_sequential_position;
+        HybridOrderStatus order_status = hybrid_order_next(
+            &search_order, &calculations_remaining, &selected_position, &candidate_source);
+        CHECK(search_order.next_sequential_position - previous_position <= 256);
+        if (order_status == HYBRID_ORDER_PAUSED) {
+            CHECK(calculations_remaining == 0 && search_order.candidates_emitted == prefix_count);
+            pause_count++;
+            continue;
+        }
+        CHECK(order_status == HYBRID_CANDIDATE_READY);
+        break;
+    }
+    CHECK(pause_count > 0);
+    CHECK(selected_position == prefix_count && candidate_source == HYBRID_SEQUENTIAL);
+    CHECK(search_order.candidates_emitted == prefix_count + 1);
+    return EXIT_SUCCESS;
+}
+
 int main(void)
 {
     const uint64_t seeds[] = {0, 1, 42, UINT64_MAX};
@@ -43,8 +147,10 @@ int main(void)
                     uint64_t repeated_position;
                     HybridCandidateSource candidate_source;
                     HybridCandidateSource repeated_source;
-                    CHECK(hybrid_order_next(&search_order, &candidate_position, &candidate_source));
-                    CHECK(hybrid_order_next(&repeated_order, &repeated_position, &repeated_source));
+                    CHECK(next_after_pauses(&search_order, 1,
+                                            &candidate_position, &candidate_source) == HYBRID_CANDIDATE_READY);
+                    CHECK(next_after_pauses(&repeated_order, UINT64_MAX,
+                                            &repeated_position, &repeated_source) == HYBRID_CANDIDATE_READY);
                     CHECK(candidate_position == repeated_position && candidate_source == repeated_source);
                     CHECK(candidate_position < block_candidate_count && !visited_positions[candidate_position]);
                     visited_positions[candidate_position] = 1;
@@ -54,7 +160,8 @@ int main(void)
                 }
                 uint64_t unused_position;
                 HybridCandidateSource unused_candidate_source;
-                CHECK(!hybrid_order_next(&search_order, &unused_position, &unused_candidate_source));
+                CHECK(next_after_pauses(&search_order, 1,
+                                        &unused_position, &unused_candidate_source) == HYBRID_ORDER_FINISHED);
                 CHECK(search_order.candidates_emitted == block_candidate_count);
                 for (uint64_t candidate_position = 0; candidate_position < block_candidate_count;
                      candidate_position++) {
@@ -63,7 +170,20 @@ int main(void)
             }
         }
     }
+    CHECK(check_mapping_pauses() == EXIT_SUCCESS);
+    CHECK(check_long_skip_pauses() == EXIT_SUCCESS);
+    /* Orden esperado para 17 claves, k=2 y semilla 42. */
+    const uint64_t expected_positions[] = {0, 1, 8, 2, 3, 12, 4, 5, 6, 7, 9, 15, 10, 11, 13, 14, 16};
     HybridOrder search_order;
+    CHECK(hybrid_order_initialize(&search_order, 17, 2, 42));
+    for (size_t position_index = 0;
+         position_index < sizeof(expected_positions) / sizeof(expected_positions[0]); position_index++) {
+        uint64_t selected_position;
+        HybridCandidateSource candidate_source;
+        CHECK(next_after_pauses(&search_order, 1,
+                                &selected_position, &candidate_source) == HYBRID_CANDIDATE_READY);
+        CHECK(selected_position == expected_positions[position_index]);
+    }
     CHECK(!hybrid_order_initialize(&search_order, 1, 0, 1));
     CHECK(!hybrid_order_initialize(&search_order, HYBRID_MAX_BLOCK_SIZE + 1, 8, 1));
     CHECK(hybrid_order_initialize(&search_order, HYBRID_MAX_BLOCK_SIZE, 8, UINT64_MAX));
@@ -73,9 +193,9 @@ int main(void)
     }
 
     /*
- * * El reparto debe cubrir todas las claves sin repetirlas, incluso si algunos
- * * trabajadores no reciben ninguna.
- */
+     * El reparto debe cubrir todas las claves sin repetirlas, incluso si
+     * algunos trabajadores no reciben ninguna.
+     */
     for (int process_count = 1; process_count <= 17; process_count++) {
         for (uint64_t total_candidates = 1; total_candidates <= 257; total_candidates++) {
             uint64_t previous_end = 0;
@@ -120,6 +240,6 @@ int main(void)
     CHECK(file_search_test_candidate(&aes_context, &search_problem, 0, &matches_phrase));
     CHECK(!matches_phrase);
     aes_ctr_context_close(&aes_context);
-    puts("OK: permutacion/inversa, cobertura sin duplicados, k=8/16/32, bloques y CTR de 4096 bytes.");
+    puts("OK: recorrido con pausas, cobertura sin duplicados, k=8/16/32, bloques y CTR de 4096 bytes.");
     return EXIT_SUCCESS;
 }
