@@ -1,5 +1,5 @@
 #!/bin/sh
-# Registra salidas originales para analizarlas despues. Uso: sh scripts/run_benchmarks.sh
+# Repite las búsquedas y guarda lo que muestra cada una. Uso: sh scripts/run_benchmarks.sh
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -10,6 +10,7 @@ benchmark_launcher=${MPIEXEC:-mpirun}
 benchmark_compiler=${CC:-cc}
 benchmark_mpi_compiler=${MPICC:-mpicc}
 
+# Recibe el nombre del dato en $1 y su valor en $2 para mostrar un error claro.
 require_positive_integer() {
     case "$2" in
         ''|*[!0-9]*) echo "$1 debe ser un entero positivo." >&2; exit 1 ;;
@@ -38,7 +39,7 @@ for process_count in $benchmark_process_counts; do
     require_positive_integer PROCESS_COUNTS "$process_count"
 done
 
-# Carpeta propia para conservar los flags y binarios de este lote.
+# Cada grupo de pruebas conserva sus propios programas y cómo se prepararon.
 run_directory="results/runs/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$run_directory"
 benchmark_build_directory="$run_directory/build"
@@ -69,10 +70,10 @@ make BUILD_DIR="$benchmark_build_directory" all > "$run_directory/build.log" 2>&
     "$benchmark_launcher" --version
 } > "$run_directory/metadata.txt" 2>&1
 
-# Incluye los fuentes usados, incluso archivos nuevos aun no versionados.
+# Guarda una copia del código usado, incluidos los archivos nuevos que aún no están en Git.
 tar -czf "$run_directory/source.tar.gz" Makefile src scripts docs/coding_conventions.md docs/benchmark_methodology.md
 
-# Calentamiento no incluido entre las repeticiones registradas.
+# Hace una primera ejecución de preparación que no se cuenta entre las mediciones.
 "$benchmark_build_directory/bin/aes_search_ctr" "$benchmark_bits" > "$run_directory/warmup_sequential.log" 2>&1
 for process_count in $benchmark_process_counts; do
     "$benchmark_launcher" -np "$process_count" "$benchmark_build_directory/bin/aes_search_mpi" "$benchmark_bits" > "$run_directory/warmup_mpi_${process_count}.log" 2>&1

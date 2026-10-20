@@ -5,8 +5,8 @@
  *              Bryan Martinez
  *              Daniela Ramirez
  * Ejercicio:   Busqueda secuencial de una clave AES mediante fuerza bruta
- * Descripcion: un unico proceso prueba claves candidatas en orden
- *              y verifica cada una con el prefijo conocido del mensaje.
+ * Descripcion: un trabajador prueba posibles claves una por una
+ *              y compara el comienzo del mensaje que logra recuperar.
  *
  *              Uso: ./build/bin/aes_search_ctr
  *                       [bits] [clave_secreta] [mensaje]
@@ -22,7 +22,7 @@
 #include <time.h>
 #include <openssl/err.h>
 
-/* Devuelve 0 si falla el reloj; el llamador conserva el control del cleanup. */
+/* Consulta el reloj. Devuelve 0 si falla para que el programa pueda cerrar sus datos de trabajo. */
 static int monotonic_seconds(double *seconds)
 {
     struct timespec current_time;
@@ -35,56 +35,56 @@ static int monotonic_seconds(double *seconds)
     return 1;
 }
 
-/* Solo cambia la candidata: el problema y el contexto se preparan antes. */
-static int search_sequential(AesCtrContext *context, const SearchOptions *options,
-                             const AesSearchProblem *problem, SearchResult *result)
+/* Prueba una clave tras otra y mide la búsqueda sobre el mensaje ya preparado. */
+static int search_sequential(AesCtrContext *aes_context, const SearchOptions *search_options,
+                             const AesSearchProblem *search_problem, SearchResult *search_result)
 {
     double start_seconds;
     double finish_seconds;
     if (!monotonic_seconds(&start_seconds)) {
         return 0;
     }
-    for (uint64_t candidate = 0; candidate < options->total_candidates; candidate++) {
+    for (uint64_t candidate = 0; candidate < search_options->total_candidates; candidate++) {
         int matches_prefix;
-        if (!aes_ctr_test_candidate(context, options, problem, candidate,
+        if (!aes_ctr_test_candidate(aes_context, search_options, search_problem, candidate,
                                      &matches_prefix)) {
             return 0;
         }
-        result->candidates_tested++;
+        search_result->candidates_tested++;
         if (matches_prefix) {
-            result->found_candidate = candidate;
+            search_result->found_candidate = candidate;
             break;
         }
     }
     if (!monotonic_seconds(&finish_seconds)) {
         return 0;
     }
-    result->elapsed_seconds = finish_seconds - start_seconds;
+    search_result->elapsed_seconds = finish_seconds - start_seconds;
     return 1;
 }
 
 int main(int argument_count, char *arguments[])
 {
-    SearchOptions options;
-    if (!search_options_parse(argument_count, arguments, &options, stderr)) {
+    SearchOptions search_options;
+    if (!search_options_parse(argument_count, arguments, &search_options, stderr)) {
         return EXIT_FAILURE;
     }
 
-    AesCtrContext context = {0};
-    AesSearchProblem problem = {0};
-    SearchResult result = {AES_CANDIDATE_NOT_FOUND, 0, 0.0};
+    AesCtrContext aes_context = {0};
+    AesSearchProblem search_problem = {0};
+    SearchResult search_result = {AES_CANDIDATE_NOT_FOUND, 0, 0.0};
     int exit_status = EXIT_FAILURE;
-    if (!aes_ctr_context_open(&context)) {
+    if (!aes_ctr_context_open(&aes_context)) {
         fprintf(stderr, "No se pudo preparar OpenSSL.\n");
         goto cleanup;
     }
-    if (!aes_ctr_prepare_problem(&context, &options, &problem)) {
+    if (!aes_ctr_prepare_problem(&aes_context, &search_options, &search_problem)) {
         fprintf(stderr, "No se pudo preparar el mensaje cifrado.\n");
         goto cleanup;
     }
-    /* La preparacion y el reporte quedan fuera del intervalo medido. */
-    if (!search_sequential(&context, &options, &problem, &result) ||
-        !search_report(&context, &options, &problem, &result, 0, 1)) {
+    /* El tiempo cuenta la búsqueda; preparar el mensaje y mostrar resultados se hace aparte. */
+    if (!search_sequential(&aes_context, &search_options, &search_problem, &search_result) ||
+        !search_report(&aes_context, &search_options, &search_problem, &search_result, 0, 1)) {
         fprintf(stderr, "No se pudo completar la busqueda secuencial.\n");
         goto cleanup;
     }
@@ -94,6 +94,6 @@ cleanup:
     if (exit_status != EXIT_SUCCESS) {
         ERR_print_errors_fp(stderr);
     }
-    aes_ctr_context_close(&context);
+    aes_ctr_context_close(&aes_context);
     return exit_status;
 }

@@ -1,69 +1,71 @@
-# Módulos compartidos
+# Partes que comparten las versiones
 
-Esta carpeta reúne las operaciones que utilizan tanto la búsqueda secuencial CTR
-como la distribuida cíclica con MPI. La variante por bloques desde archivo conserva
-la implementación independiente de los ejercicios 1 y 2. Cada ejecutable define
-el recorrido de candidatas, la medición del tiempo y su forma de terminar ante
-un error. La referencia ECB se mantiene independiente.
+Esta carpeta reúne las funciones que se usan en más de una versión. Por ejemplo,
+las versiones CTR necesitan construir posibles claves y comprobar si pueden
+descifrar un mensaje. Mantener esas funciones juntas permite corregirlas en un
+solo lugar. El ejemplo original ECB se conserva aparte y contiene sus propias
+funciones.
 
-| Módulo | Responsabilidad | Datos principales |
-| --- | --- | --- |
-| `search_options` | Validar argumentos y establecer los límites del ejercicio. | `SearchOptions`: bits desconocidos, rango, candidata secreta y mensaje conocido. |
-| `aes_ctr` | Preparar el mensaje cifrado, construir claves y verificar candidatas. | `AesCtrContext`: recursos EVP. `AesSearchProblem`: base, IV y texto cifrado. |
-| `search_reporting` | Descifrar con la candidata elegida y mostrar las estadísticas. | `SearchResult`: candidata encontrada, pruebas realizadas y duración. |
+Llamamos **candidata** a una posible clave que vamos a probar. En las versiones
+distribuidas, cada trabajador es una copia del programa que busca en una parte
+del conjunto de claves.
 
-Los archivos `.h` documentan el uso de cada función, sus parámetros, condiciones
-previas y retornos. Los `.c` explican las decisiones internas, como el orden de
-los bytes de una clave y la reinicialización del contador CTR.
+| Archivo | Para qué sirve |
+| --- | --- |
+| `search_options` | Revisa los datos que se escriben al iniciar `aes_search_ctr` y `aes_search_mpi`, como la cantidad de claves y el mensaje. |
+| `aes_ctr` | Cifra y descifra mensajes con ayuda de OpenSSL, una biblioteca de cifrado. También construye las claves que se van a probar. |
+| `search_reporting` | Muestra la posible clave encontrada, el mensaje recuperado y el tiempo de búsqueda de `aes_search_ctr` y `aes_search_mpi`. |
+| `file_search` | Lee el archivo de entrada y comprueba si una clave recupera la frase `es una prueba de`. Lo comparten las versiones por bloques e híbrida. |
+| `hybrid_order` | Decide qué clave probar después en la versión híbrida, alternando claves consecutivas con otras tomadas en un orden diferente. Evita repetir pruebas. |
 
-## Flujo de uso
+Cada nombre corresponde a dos archivos. El `.h` explica qué ofrece esa parte y
+cómo usarla. El `.c` contiene los pasos que realizan el trabajo.
 
-1. `search_options_parse()` valida la entrada. Establece el rango exclusivo
-   `[0, total_candidates)`, donde `total_candidates = 2^unknown_key_bits`.
-2. Cada trabajador inicializa `AesCtrContext` con `{0}` y llama a
-   `aes_ctr_context_open()`. La instancia es suya y no se comparte entre hilos.
-3. `aes_ctr_prepare_problem()` genera una base de clave y un IV aleatorios y cifra
-   el mensaje con la candidata secreta. En MPI lo hace únicamente rank 0; el
-   ejecutable distribuye los arreglos antes de comenzar la búsqueda.
-4. El ejecutable llama a `aes_ctr_test_candidate()` para cada valor asignado.
-   Esa función construye la clave y comprueba el prefijo conocido; no consulta
-   la candidata secreta para decidir si existe coincidencia.
-5. Al terminar la búsqueda y la medición, `search_report()` recibe el resultado.
-   En MPI se llama desde rank 0 después de agregar conteos y tiempos.
-6. Cada trabajador libera sus recursos con `aes_ctr_context_close()`.
+## Cómo se relacionan
 
-## Retornos y propiedad de memoria
+Primero se revisan los datos de entrada y se prepara un mensaje cifrado con una
+clave conocida. Esa clave sirve para crear el ejercicio; durante la búsqueda se
+prueban posibles claves sin consultar la respuesta.
 
-Las funciones que pueden fallar devuelven `1` en éxito y `0` en error. En
-`aes_ctr_test_candidate()`, ese retorno indica si se pudo hacer la evaluación:
-el parámetro de salida `matches_prefix` indica si la candidata coincide.
+Después, cada versión decide en qué orden hará las pruebas. Para cada candidata
+usa las funciones de cifrado de esta carpeta. Al terminar, reúne lo encontrado y
+muestra el resultado.
 
-Los módulos no llaman a `exit()` ni a `MPI_Abort()`. El ejecutable decide si
-libera recursos y termina o si debe abortar el comunicador para evitar que otros
-procesos queden esperando. Los errores EVP pueden consultarse con
-`ERR_print_errors_fp()`. Los errores de argumentos se escriben en el flujo
-entregado a `search_options_parse()`, que puede ser `NULL` para silenciarlos.
+Hay dos formas de comprobar una candidata. `aes_search_ctr` y `aes_search_mpi` comparan
+hasta los primeros ocho bytes del mensaje, es decir, una pequeña parte de su
+inicio. Si esa parte es muy corta, más de una clave puede producir una
+coincidencia. Las versiones por bloques e híbrida descifran el mensaje completo y
+buscan la frase `es una prueba de` en cualquier posición.
 
-`SearchOptions.message` referencia el argumento original o un literal y no debe
-liberarse desde estos módulos. Las claves, el IV y el texto cifrado se guardan
-en arreglos de tamaño fijo; sus longitudes se expresan en **bytes**. Las salidas
-EVP son binarias y no tienen terminador nulo. Los buffers de transformación deben
-tener capacidad `AES_OUTPUT_CAPACITY`, aunque el mensaje sea más pequeño.
+En la versión híbrida, `k` indica cuántas claves consecutivas se prueban antes de
+hacer un intento en otro orden. Por ejemplo, con `k=8` se hacen ocho pruebas en
+orden y luego una de las llamadas «tiros revueltos» en la propuesta. Un número
+llamado semilla permite volver a generar el mismo orden. Se omiten las claves
+que ya se habían probado por cualquiera de los dos caminos.
 
-## Supuestos que deben conservarse
+Los tamaños del mensaje se miden en bytes, la unidad usada para contar su espacio
+en memoria. Las versiones que comparan el inicio aceptan hasta 256 bytes y las que leen un
+archivo aceptan hasta 4096. Los comentarios de cada función indican cuánto
+espacio se necesita y qué significa su respuesta.
 
-- Solo se reemplazan los bits inferiores de la clave base. La cola se interpreta
-  como entero big-endian para obtener la misma clave en distintas arquitecturas.
-- Cada candidata comienza con la misma base y el mismo IV del problema; no se
-  continúa el contador que dejó la operación anterior.
-- Se comparan como máximo 8 bytes conocidos. Una coincidencia indica una clave
-  compatible con ese prefijo; no demuestra que sea la candidata secreta original.
-  Los mensajes cortos ofrecen menos evidencia y admiten más coincidencias.
-- `AES_CANDIDATE_NOT_FOUND` representa la ausencia de coincidencia y queda fuera
-  del rango de candidatas permitido.
-- El proceso ganador que imprime `search_report()` se deduce del reparto cíclico
-  actual mediante `candidata % process_count`. Otro reparto requiere revisar ese
-  cálculo.
-- El reporte recibe el tiempo ya medido: en MPI se usa el máximo de las duraciones
-  locales y la suma de las candidatas probadas. No incluye su propio descifrado
-  final ni la impresión en el intervalo de búsqueda.
+## Cómo leer los nombres del código
+
+Los nombres se mantienen en inglés para seguir el mismo criterio en todos los
+archivos. Estos aparecen en varias funciones:
+
+| Nombre | Qué representa |
+| --- | --- |
+| `search_options` | Los datos elegidos al iniciar el programa, como el mensaje y cuántas claves se van a probar. |
+| `aes_context` | Los datos de trabajo que OpenSSL reutiliza para cifrar y descifrar. |
+| `search_problem` | El mensaje cifrado y los datos necesarios para intentar recuperarlo. |
+| `search_result` | La clave encontrada, cuántas se probaron y cuánto tardó la búsqueda. |
+| `candidate` | El número de la posible clave que se está probando. |
+
+En el reparto por grupos, `first_candidate` es la primera clave y
+`candidate_limit` la primera que queda fuera. Por ejemplo, un grupo que empieza
+en 100 y termina antes de 104 contiene 100, 101, 102 y 103. Dentro del grupo,
+`candidate_position` cuenta desde cero; la posición 3 corresponde a la clave
+103. `sequential_trials_per_turn` es el valor de `k`.
+
+La [guía de las versiones distribuidas](../distributed/README.md) explica cómo
+se reparte el trabajo y cómo probar los valores de `k`.

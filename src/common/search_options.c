@@ -1,10 +1,6 @@
-/**
- * @file search_options.c
- * @brief Convierte la CLI en una configuracion consistente para ambas busquedas.
- *
- * Primero valida el numero de bits, despues el rango de la candidata secreta y
- * finalmente el mensaje. Los valores derivados solo se calculan cuando sus
- * entradas son validas. Los contratos publicos estan en search_options.h.
+/*
+ * Revisa los datos escritos al iniciar el programa. Primero comprueba el tamaño
+ * de la búsqueda, después la clave del ejercicio y al final el mensaje.
  */
 #include "search_options.h"
 
@@ -14,9 +10,8 @@
 #include <string.h>
 
 /*
- * Emite un diagnostico con formato printf si hay flujo de salida. Devuelve
- * siempre 0 para propagar el error directamente desde search_options_parse().
- * format y sus argumentos deben corresponderse; error_stream puede ser NULL.
+ * Muestra el error en error_stream, si se indicó uno, y devuelve 0 para señalar
+ * que la entrada no sirve.
  */
 static int reject_options(FILE *error_stream, const char *format, ...)
 {
@@ -30,14 +25,11 @@ static int reject_options(FILE *error_stream, const char *format, ...)
 }
 
 /*
- * Valida y convierte un string decimal a uint64_t. text y parsed_value deben
- * ser validos; el destino solo se escribe en exito. Devuelve 1 en exito, 0 si
- * no hay digitos, hay otro caracter o el valor no cabe en uint64_t.
- *
- * El recorrido previo rechaza signos y espacios que strtoumax podria aceptar;
- * errno y el limite de uint64_t cubren los desbordamientos de la conversion.
+ * Revisa que text contenga solo dígitos y que el número quepa en uint64_t.
+ * Devuelve 1 y lo guarda en parsed_value si está bien; devuelve 0 sin cambiar
+ * la salida si falla. La revisión inicial evita aceptar signos o espacios.
  */
-static int parse_unsigned_decimal(const char *text, uint64_t *parsed_value)
+int search_parse_unsigned_decimal(const char *text, uint64_t *parsed_value)
 {
     if (text[0] == '\0') {
         return 0;
@@ -59,7 +51,7 @@ static int parse_unsigned_decimal(const char *text, uint64_t *parsed_value)
 }
 
 int search_options_parse(int argument_count, char *arguments[],
-                         SearchOptions *options, FILE *error_stream)
+                         SearchOptions *search_options, FILE *error_stream)
 {
     uint64_t unknown_bits_argument = AES_DEFAULT_UNKNOWN_BITS;
     if (argument_count > 4) {
@@ -67,7 +59,7 @@ int search_options_parse(int argument_count, char *arguments[],
             "Uso: %s [bits] [clave_secreta] [mensaje]\n", arguments[0]);
     }
     if (argument_count > 1 &&
-        !parse_unsigned_decimal(arguments[1], &unknown_bits_argument)) {
+        !search_parse_unsigned_decimal(arguments[1], &unknown_bits_argument)) {
         return reject_options(error_stream,
             "Valor invalido para bits: %s\n", arguments[1]);
     }
@@ -77,31 +69,34 @@ int search_options_parse(int argument_count, char *arguments[],
                               AES_MIN_UNKNOWN_BITS, AES_MAX_UNKNOWN_BITS);
     }
 
-    /* Validar antes del cast y del desplazamiento evita cantidades fuera de rango. */
-    options->unknown_key_bits = (int)unknown_bits_argument;
-    options->total_candidates = UINT64_C(1) << options->unknown_key_bits;
-    /* La ultima candidata fuerza a recorrer todo el espacio en el caso normal. */
-    options->secret_candidate = options->total_candidates - 1;
+    /* Revisa el número de bits antes de usarlo para calcular cuántas claves habrá. */
+    search_options->unknown_key_bits = (int)unknown_bits_argument;
+    search_options->total_candidates = UINT64_C(1) << search_options->unknown_key_bits;
+    /*
+ * * Se usa la última clave como punto de partida para un caso que recorra todo
+ * * el conjunto, salvo coincidencias accidentales.
+ */
+    search_options->secret_candidate = search_options->total_candidates - 1;
     if (argument_count > 2 &&
-        !parse_unsigned_decimal(arguments[2], &options->secret_candidate)) {
+        !search_parse_unsigned_decimal(arguments[2], &search_options->secret_candidate)) {
         return reject_options(error_stream,
             "Valor invalido para clave_secreta: %s\n", arguments[2]);
     }
-    if (options->secret_candidate >= options->total_candidates) {
+    if (search_options->secret_candidate >= search_options->total_candidates) {
         return reject_options(error_stream,
-            "clave_secreta debe ser menor que 2^%d.\n", options->unknown_key_bits);
+            "clave_secreta debe ser menor que 2^%d.\n", search_options->unknown_key_bits);
     }
 
-    /* Se presta el string original: no se crea una copia que haya que liberar. */
-    options->message = argument_count > 3 ? arguments[3] : AES_DEFAULT_MESSAGE;
-    options->message_length = strlen(options->message);
-    if (options->message_length == 0 ||
-        options->message_length > AES_MAX_MESSAGE_LENGTH) {
+    /* Conserva el texto de entrada sin crear una copia. */
+    search_options->message = argument_count > 3 ? arguments[3] : AES_DEFAULT_MESSAGE;
+    search_options->message_length = strlen(search_options->message);
+    if (search_options->message_length == 0 ||
+        search_options->message_length > AES_MAX_MESSAGE_LENGTH) {
         return reject_options(error_stream,
             "El mensaje debe tener entre 1 y %d bytes.\n", AES_MAX_MESSAGE_LENGTH);
     }
-    /* Un mensaje corto reduce la evidencia disponible para verificar una clave. */
-    options->prefix_length = options->message_length < AES_KNOWN_PREFIX_LENGTH
-        ? options->message_length : AES_KNOWN_PREFIX_LENGTH;
+    /* Cuanto más corto sea el mensaje, menos información hay para reconocer la clave. */
+    search_options->prefix_length = search_options->message_length < AES_KNOWN_PREFIX_LENGTH
+        ? search_options->message_length : AES_KNOWN_PREFIX_LENGTH;
     return 1;
 }

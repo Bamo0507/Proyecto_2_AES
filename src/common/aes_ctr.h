@@ -1,10 +1,7 @@
-/**
- * @file aes_ctr.h
- * @brief Operaciones criptograficas del ejercicio de busqueda AES-128-CTR.
- *
- * El modulo prepara el problema y verifica una candidata por llamada. No decide
- * el orden de busqueda ni comunica resultados entre procesos. Todas las funciones
- * requieren punteros validos; los errores se devuelven al ejecutable llamador.
+/*
+ * Cifra y descifra mensajes con ayuda de OpenSSL. También prepara el mensaje
+ * del ejercicio y prueba posibles claves. Cada versión del programa decide en
+ * qué orden las prueba.
  */
 #ifndef AES_SEARCH_CTR_H
 #define AES_SEARCH_CTR_H
@@ -13,132 +10,129 @@
 
 #include <openssl/evp.h>
 
-/* AES-128 utiliza una clave de 16 bytes; el contador inicial CTR ocupa 16 bytes. */
+/* La clave y el dato de inicio del cifrado ocupan 16 bytes cada uno. */
 #define AES_KEY_LENGTH 16
 #define AES_IV_LENGTH 16
-/* Cola de clave interpretada como entero big-endian para insertar la candidata. */
+/* Los últimos ocho bytes permiten escribir el número de la clave que se quiere probar. */
 #define AES_KEY_TAIL_BYTES 8
-/* Reserva adicional para las operaciones Update/Final de la interfaz EVP. */
+/* Se deja espacio adicional para que OpenSSL pueda terminar la operación. */
 #define AES_OUTPUT_CAPACITY (AES_MAX_MESSAGE_LENGTH + EVP_MAX_BLOCK_LENGTH)
 
-/**
- * @brief Recursos OpenSSL propiedad de un trabajador.
- *
- * Inicializar con {0}, abrir una vez por proceso y cerrar al terminar. El contexto
- * se reutiliza entre candidatas para evitar reservarlo en cada iteracion.
- * No copiar una instancia abierta ni compartirla entre hilos: cada trabajador
- * debe ser propietario de sus recursos y liberarlos una sola vez.
+/*
+ * Datos que OpenSSL necesita para cifrar. Se preparan una vez por trabajador y
+ * se reutilizan para probar varias claves. Crear con {0}, abrir antes de
+ * usarlos y cerrar al terminar. Cada trabajador debe usar sus propios datos,
+ * sin copiar una instancia abierta ni compartirla entre tareas simultáneas.
  */
 typedef struct {
-    EVP_CIPHER *cipher;             /**< Descriptor AES-128-CTR obtenido con fetch. */
-    EVP_CIPHER_CTX *cipher_context; /**< Estado mutable de la operacion EVP actual. */
+    EVP_CIPHER *cipher;             /* Método de cifrado que se va a usar. */
+    EVP_CIPHER_CTX *cipher_context; /* Datos de trabajo que cambian al cifrar o descifrar. */
 } AesCtrContext;
 
-/**
- * @brief Datos del mismo problema que deben conocer todos los trabajadores.
- *
- * En MPI los genera rank 0 y se transmiten los arreglos por separado, evitando
- * depender del padding o layout de la estructura. No contiene punteros propios.
- * La longitud util de ciphertext esta en SearchOptions.message_length; la
- * capacidad restante del arreglo no forma parte del mensaje cifrado.
+/*
+ * Datos del mensaje que van a intentar recuperar todos los trabajadores. En las
+ * versiones con MPI los prepara el trabajador 0 y comparte cada arreglo por
+ * separado. Solo los bytes que corresponden al tamaño del mensaje pertenecen al
+ * texto cifrado; el resto es espacio adicional de trabajo.
  */
 typedef struct {
-    unsigned char base_key[AES_KEY_LENGTH]; /**< Base para reconstruir cada clave. */
-    unsigned char initialization_vector[AES_IV_LENGTH]; /**< Contador inicial publico. */
-    unsigned char ciphertext[AES_OUTPUT_CAPACITY]; /**< Mensaje cifrado, sin '\0'. */
+    unsigned char base_key[AES_KEY_LENGTH]; /* Parte de la clave que se conserva al probar otras. */
+    /* Dato de inicio que también se necesita para descifrar. */
+    unsigned char initialization_vector[AES_IV_LENGTH];
+    unsigned char ciphertext[AES_OUTPUT_CAPACITY]; /* Mensaje cifrado, guardado como bytes. */
 } AesSearchProblem;
 
-/**
- * @brief Reserva el descriptor AES-128-CTR y su contexto de trabajo.
- * @param[in,out] context Instancia inicializada con {0} o previamente cerrada.
- * @return 1 si ambos recursos estan disponibles; 0 si falla alguna reserva.
- *
- * En error libera cualquier reserva parcial y deja ambos punteros en NULL.
- * No llamar sobre una instancia abierta: se perderian sus recursos anteriores.
+/*
+ * Prepara OpenSSL para empezar a trabajar. Recibe aes_context creado con {0} o
+ * ya cerrado. Devuelve 1 si está listo y 0 si falla. Si la preparación queda a
+ * medias, libera lo que alcanzó a reservar. No abrir de nuevo una instancia que
+ * todavía está en uso.
  */
-int aes_ctr_context_open(AesCtrContext *context);
+int aes_ctr_context_open(AesCtrContext *aes_context);
 
-/**
- * @brief Libera los recursos del contexto y deja sus punteros en NULL.
- * @param[in,out] context Instancia abierta, cerrada o inicializada con {0}.
- *
- * Puede llamarse varias veces sobre la misma instancia; context no puede ser NULL.
+/*
+ * Libera los datos de trabajo de OpenSSL y deja sus campos en NULL. Puede
+ * repetirse sobre una instancia ya cerrada; aes_context debe existir.
  */
-void aes_ctr_context_close(AesCtrContext *context);
+void aes_ctr_context_close(AesCtrContext *aes_context);
 
-/**
- * @brief Reconstruye una clave reemplazando los bits inferiores de una base.
- * @param[in] base_key Base de AES_KEY_LENGTH bytes, conservada por la funcion.
- * @param[in] candidate Entero que representa los bits desconocidos de la clave.
- * @param[in] unknown_key_bits Cantidad de bits inferiores que se reemplazan.
- * @param[out] candidate_key Destino de AES_KEY_LENGTH bytes, distinto de base_key.
- * @pre unknown_key_bits esta entre 1 y 40. Para la busqueda, candidate debe ser
- *      menor que 2^unknown_key_bits; esta funcion solo aplica la mascara.
+/*
+ * Construye una clave a partir de base_key y del número candidate. Solo cambia
+ * los últimos unknown_key_bits bits, es decir, la parte final que se está
+ * buscando. Conserva el resto de la clave y escribe el resultado en
+ * candidate_key, un arreglo distinto de AES_KEY_LENGTH bytes.
  *
- * Los demas bits se conservan. La cola se lee y escribe en orden big-endian,
- * independientemente de la arquitectura de la maquina. No genera aleatoriedad
- * ni valida rangos: esos controles corresponden a SearchOptions.
+ * unknown_key_bits debe estar entre 1 y 63 y candidate debe ser menor que
+ * 2^unknown_key_bits. Esas condiciones se revisan antes de llamar a esta
+ * función. Se guarda primero la parte de mayor valor del número para obtener la
+ * misma clave en todas las máquinas.
  */
 void aes_ctr_make_candidate_key(const unsigned char base_key[AES_KEY_LENGTH],
                                 uint64_t candidate, int unknown_key_bits,
                                 unsigned char candidate_key[AES_KEY_LENGTH]);
 
-/**
- * @brief Cifra o descifra bytes mediante AES-128-CTR, sin relleno.
- * @param[in,out] context Contexto abierto; su estado EVP cambia en cada llamada.
- * @param[in] key Clave completa de AES_KEY_LENGTH bytes.
- * @param[in] initialization_vector Contador inicial de AES_IV_LENGTH bytes.
- * @param[in] input Entrada con al menos input_length bytes legibles.
- * @param[in] input_length Cantidad de bytes, entre 1 y AES_MAX_MESSAGE_LENGTH.
- * @param[out] output Buffer separado de input, con AES_OUTPUT_CAPACITY bytes.
- * @return 1 si se produjeron exactamente input_length bytes; 0 si la longitud
- *         es invalida, falla EVP o la longitud de salida es inesperada.
+/*
+ * Cifra o descifra input usando key y el dato de inicio initialization_vector.
+ * aes_context debe estar abierto. input_length indica cuántos bytes se leen,
+ * entre 1 y AES_MAX_MESSAGE_LENGTH. output debe ser otro arreglo con
+ * AES_OUTPUT_CAPACITY bytes disponibles.
  *
- * CTR usa la misma operacion para cifrar y descifrar. Reinicializar clave e IV
- * impide arrastrar el contador de una candidata a la siguiente. El resultado es
- * binario y no recibe terminador nulo; si falla la operacion no debe utilizarse.
- * La funcion no imprime errores ni termina el proceso. Los errores de OpenSSL
- * pueden consultarse desde el ejecutable con ERR_print_errors_fp().
+ * Devuelve 1 si termina bien y 0 si falla. La salida contiene bytes, sin la
+ * marca final de un texto en C. Si falla, no debe utilizarse. Cada prueba
+ * empieza desde el mismo dato de inicio para que una candidata no continúe
+ * donde terminó la anterior.
  */
-int aes_ctr_transform(AesCtrContext *context,
+int aes_ctr_transform(AesCtrContext *aes_context,
                       const unsigned char key[AES_KEY_LENGTH],
                       const unsigned char initialization_vector[AES_IV_LENGTH],
                       const unsigned char *input, size_t input_length,
                       unsigned char output[AES_OUTPUT_CAPACITY]);
 
-/**
- * @brief Genera la base y el IV aleatorios y cifra el mensaje del ejercicio.
- * @param[in,out] context Contexto abierto para cifrar la entrada conocida.
- * @param[in] options Opciones validadas; secret_candidate solo prepara el cifrado.
- * @param[out] problem Destino de la base, el IV y el texto cifrado.
- * @return 1 si el problema esta listo; 0 si falla RAND_bytes() o el cifrado.
+/*
+ * La misma operación de cifrado, indicando también cuánto espacio hay en
+ * output. La usan las versiones que leen archivos de hasta 4096 bytes.
+ * aes_context debe estar abierto y key e initialization_vector tienen los
+ * tamaños indicados arriba.
  *
- * En error problem puede quedar parcialmente escrito y debe descartarse.
- * En secuencial se ejecuta una vez; en MPI solo rank 0 debe invocarla y luego
- * compartir los datos. Cada llamada genera un problema aleatorio nuevo.
+ * input_length debe estar entre 1 e INT_MAX - EVP_MAX_BLOCK_LENGTH. output debe
+ * ser distinto de input y tener al menos input_length + EVP_MAX_BLOCK_LENGTH
+ * bytes. Devuelve 1 al terminar bien y 0 si falla o falta espacio; en ese caso
+ * no se debe usar la salida.
  */
-int aes_ctr_prepare_problem(AesCtrContext *context, const SearchOptions *options,
-                            AesSearchProblem *problem);
+int aes_ctr_transform_buffer(AesCtrContext *aes_context,
+                             const unsigned char key[AES_KEY_LENGTH],
+                             const unsigned char initialization_vector[AES_IV_LENGTH],
+                             const unsigned char *input, size_t input_length,
+                             unsigned char *output, size_t output_capacity);
 
-/**
- * @brief Comprueba si una candidata descifra el prefijo conocido del mensaje.
- * @param[in,out] context Contexto abierto, exclusivo del trabajador actual.
- * @param[in] options Opciones validadas, con mensaje y longitud del prefijo.
- * @param[in] problem Problema preparado con las mismas opciones.
- * @param[in] candidate Valor entre 0 y options->total_candidates - 1.
- * @param[out] matches_prefix Recibe 1 si coincide el prefijo, o 0 si no coincide.
- * @return 1 si se pudo evaluar la candidata; 0 si fallo la operacion EVP.
+/*
+ * Prepara el mensaje que se va a intentar recuperar. Recibe aes_context abierto
+ * y search_options con los datos ya revisados. Genera una base de clave y un
+ * dato de inicio nuevos, cifra el mensaje con la clave del ejercicio y guarda
+ * todo en search_problem.
  *
- * Un retorno 1 no significa que se encontro una coincidencia: hay que consultar
- * matches_prefix, cuyo contenido solo es valido cuando la funcion tiene exito.
- * No se consulta options->secret_candidate para decidir la coincidencia.
- *
- * Se descifran hasta 8 bytes, sin procesar el resto. Una coincidencia identifica
- * una candidata compatible y no demuestra unicidad. Con mensajes mas cortos se
- * compara un prefijo menor y aumenta la posibilidad de coincidencias accidentales.
+ * En MPI solo lo hace el trabajador 0 antes de compartir los datos. Devuelve 1
+ * si el problema está listo y 0 si falla; si falla, search_problem puede estar
+ * incompleto.
  */
-int aes_ctr_test_candidate(AesCtrContext *context, const SearchOptions *options,
-                           const AesSearchProblem *problem, uint64_t candidate,
+int aes_ctr_prepare_problem(AesCtrContext *aes_context, const SearchOptions *search_options,
+                            AesSearchProblem *search_problem);
+
+/*
+ * Prueba si candidate recupera el comienzo conocido del mensaje. Recibe
+ * aes_context abierto, las search_options revisadas y el search_problem
+ * preparado con ellas. candidate debe estar entre cero y total_candidates - 1.
+ *
+ * Devuelve 1 si pudo hacer la prueba y 0 si falló el cifrado. La respuesta de
+ * la prueba queda en matches_prefix: 1 si coincide y 0 si no. Solo se debe leer
+ * esa respuesta si la función terminó bien.
+ *
+ * Compara como máximo ocho bytes del inicio del mensaje. Una coincidencia no
+ * asegura que sea la clave original, sobre todo si el mensaje es muy corto. La
+ * prueba no consulta la clave secreta usada para preparar el ejercicio.
+ */
+int aes_ctr_test_candidate(AesCtrContext *aes_context, const SearchOptions *search_options,
+                           const AesSearchProblem *search_problem, uint64_t candidate,
                            int *matches_prefix);
 
 #endif

@@ -5,14 +5,14 @@
  *              Bryan Martinez
  *              Daniela Ramirez
  * Ejercicio:   Busqueda secuencial de una clave AES mediante fuerza bruta
- * Descripcion: un unico proceso prueba claves candidatas en orden
- *              y compara el mensaje descifrado con el texto original.
+ * Descripcion: un trabajador prueba posibles claves una por una
+ *              y compara el mensaje recuperado con el original.
  *
  *              Para fines educativos, la busqueda se limita a
  *              1,048,576 candidatas del espacio de claves de AES.
- *              El cifrado utiliza la interfaz EVP de OpenSSL.
+ *              OpenSSL realiza el cifrado del mensaje.
  *              Se mide el tiempo transcurrido durante la busqueda.
- *              Referencia docente ECB, separada de la comparacion CTR/MPI.
+ *              Se conserva como el ejemplo original para estudiar el proceso.
  *              Uso: ./build/bin/aes_search_ecb
  *----------------------------------------------------------------------*/
 
@@ -27,21 +27,21 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 
-#define TOTAL_KEYS (UINT64_C(1) << 20)
-#define SECRET_KEY UINT64_C(12345)
-#define MESSAGE_LEN 16
+#define TOTAL_CANDIDATES (UINT64_C(1) << 20)
+#define SECRET_CANDIDATE UINT64_C(12345)
+#define MESSAGE_LENGTH 16
 
-/* Tamano de una clave AES-128, en bytes. */
-#define KEY_LEN 16
+/* Espacio que ocupa una clave AES-128, en bytes. */
+#define AES_KEY_LENGTH 16
 
-/* Bytes finales de la clave donde se escribe la candidata (64 bits). */
-#define TAIL_BYTES 8
+/* Parte final de la clave donde se escribe el número que se va a probar. */
+#define CANDIDATE_KEY_BYTES 8
 
-/* Texto original de 16 bytes; el cero final no se cifra. */
-static const unsigned char message[] = "Puedes lograrlo!";
+/* El texto ocupa 16 bytes; su marca final no se cifra. */
+static const unsigned char original_message[] = "Puedes lograrlo!";
 
 _Static_assert(
-    sizeof(message) - 1 == MESSAGE_LEN,
+    sizeof(original_message) - 1 == MESSAGE_LENGTH,
     "El mensaje debe tener exactamente 16 bytes."
 );
 
@@ -54,128 +54,128 @@ static void fail(const char *description)
 }
 
 /*
- * Construye una clave AES no aleatoria a partir de la candidata:
- * los primeros bytes quedan en cero y la candidata se escribe en
- * los ultimos TAIL_BYTES bytes, en orden big-endian.
+ * Construye la clave a partir del número candidato. Completa el inicio con
+ * ceros y escribe el número en los últimos ocho bytes, con la parte de mayor
+ * valor primero.
  */
-static void make_key(uint64_t candidate, unsigned char key[KEY_LEN])
+static void make_key(uint64_t candidate, unsigned char candidate_key[AES_KEY_LENGTH])
 {
-    memset(key, 0, KEY_LEN);
+    memset(candidate_key, 0, AES_KEY_LENGTH);
 
-    for (int byte_index = 0; byte_index < TAIL_BYTES; byte_index++) {
-        key[KEY_LEN - 1 - byte_index] = (unsigned char)(
+    for (int byte_index = 0; byte_index < CANDIDATE_KEY_BYTES; byte_index++) {
+        candidate_key[AES_KEY_LENGTH - 1 - byte_index] = (unsigned char)(
             (candidate >> (8 * byte_index)) & UINT64_C(0xFF)
         );
     }
 }
 
 /*
- * Cifra o descifra un bloque mediante AES-128-ECB.
- * encrypt = 1: cifrar; encrypt = 0: descifrar.
- * ECB se utiliza para un unico bloque educativo.
+ * Cifra o descifra los 16 bytes del mensaje con AES-128-ECB. encrypt_message
+ * vale 1 para cifrar y 0 para descifrar. Este ejemplo utiliza un solo grupo de
+ * 16 bytes.
  */
 static void crypt_block(
-    EVP_CIPHER_CTX *cipher_ctx,
+    EVP_CIPHER_CTX *cipher_context,
     uint64_t candidate,
-    const unsigned char *input,
-    unsigned char *output,
-    int encrypt)
+    const unsigned char *input_message,
+    unsigned char *output_message,
+    int encrypt_message)
 {
-    unsigned char key[KEY_LEN];
-    int written = 0;
-    int final_written = 0;
+    unsigned char candidate_key[AES_KEY_LENGTH];
+    int bytes_written = 0;
+    int final_bytes_written = 0;
 
-    make_key(candidate, key);
+    make_key(candidate, candidate_key);
 
     if (EVP_CipherInit_ex(
-            cipher_ctx, EVP_aes_128_ecb(), NULL,
-            key, NULL, encrypt) != 1) {
+            cipher_context, EVP_aes_128_ecb(), NULL,
+            candidate_key, NULL, encrypt_message) != 1) {
         fail("Error al inicializar AES.");
     }
 
-    /* El mensaje ocupa exactamente un bloque, sin relleno. */
-    if (EVP_CIPHER_CTX_set_padding(cipher_ctx, 0) != 1) {
+    /* El mensaje ya ocupa los 16 bytes completos y no necesita agregar otros. */
+    if (EVP_CIPHER_CTX_set_padding(cipher_context, 0) != 1) {
         fail("Error al configurar el relleno.");
     }
 
     if (EVP_CipherUpdate(
-            cipher_ctx, output, &written,
-            input, MESSAGE_LEN) != 1) {
+            cipher_context, output_message, &bytes_written,
+            input_message, MESSAGE_LENGTH) != 1) {
         fail("Error al procesar el bloque.");
     }
 
     if (EVP_CipherFinal_ex(
-            cipher_ctx, output + written, &final_written) != 1) {
+            cipher_context, output_message + bytes_written, &final_bytes_written) != 1) {
         fail("Error al finalizar la operacion AES.");
     }
 
-    if (written + final_written != MESSAGE_LEN) {
+    if (bytes_written + final_bytes_written != MESSAGE_LENGTH) {
         fail("Longitud inesperada del resultado.");
     }
 }
 
-/* Obtiene el tiempo de un reloj monotono, en segundos. */
+/* Consulta un reloj que mide duración sin verse afectado por cambios de la hora. */
 static double get_time(void)
 {
-    struct timespec current;
+    struct timespec current_time;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &current) != 0) {
+    if (clock_gettime(CLOCK_MONOTONIC, &current_time) != 0) {
         perror("Error al consultar el reloj");
         exit(EXIT_FAILURE);
     }
 
-    return (double)current.tv_sec +
-           (double)current.tv_nsec / 1000000000.0;
+    return (double)current_time.tv_sec +
+           (double)current_time.tv_nsec / 1000000000.0;
 }
 
 /*
- * Cifra el mensaje con SECRET_KEY, prueba las candidatas desde cero
- * hasta encontrar la que lo descifra y reporta la clave y el tiempo.
+ * Prepara el mensaje con SECRET_CANDIDATE. Después prueba claves desde cero y
+ * muestra la que recupera el mensaje, junto con el tiempo de búsqueda.
  */
 int main(void)
 {
-    EVP_CIPHER_CTX *cipher_ctx = EVP_CIPHER_CTX_new();
+    EVP_CIPHER_CTX *cipher_context = EVP_CIPHER_CTX_new();
 
-    if (cipher_ctx == NULL) {
+    if (cipher_context == NULL) {
         fail("No se pudo crear el contexto de OpenSSL.");
     }
 
-    unsigned char cipher_text[
-        MESSAGE_LEN + EVP_MAX_BLOCK_LENGTH
+    unsigned char ciphertext[
+        MESSAGE_LENGTH + EVP_MAX_BLOCK_LENGTH
     ] = {0};
 
-    unsigned char plain_text[
-        MESSAGE_LEN + EVP_MAX_BLOCK_LENGTH
+    unsigned char recovered_message[
+        MESSAGE_LENGTH + EVP_MAX_BLOCK_LENGTH
     ] = {0};
 
     /*
-     * Prepara el mensaje cifrado.
-     * SECRET_KEY solo se utiliza para preparar el ejercicio.
-     */
-    crypt_block(cipher_ctx, SECRET_KEY, message, cipher_text, 1);
+ * * Usa SECRET_CANDIDATE para crear el mensaje cifrado antes de comenzar la *
+ * búsqueda.
+ */
+    crypt_block(cipher_context, SECRET_CANDIDATE, original_message, ciphertext, 1);
 
-    uint64_t found_key = UINT64_MAX;
+    uint64_t found_candidate = UINT64_MAX;
 
-    /* La medicion comienza despues de preparar el mensaje. */
-    double start_time = get_time();
+    /* Empieza a medir después de preparar el mensaje. */
+    double start_seconds = get_time();
 
-    /* Prueba las claves consecutivamente desde cero. */
-    for (uint64_t candidate = 0; candidate < TOTAL_KEYS; candidate++) {
-        crypt_block(cipher_ctx, candidate, cipher_text, plain_text, 0);
+    /* Prueba las claves en orden desde cero. */
+    for (uint64_t candidate = 0; candidate < TOTAL_CANDIDATES; candidate++) {
+        crypt_block(cipher_context, candidate, ciphertext, recovered_message, 0);
 
-        /* Verifica todos los bytes del mensaje conocido. */
-        if (memcmp(plain_text, message, MESSAGE_LEN) == 0) {
-            found_key = candidate;
+        /* Compara todo el mensaje recuperado con el original. */
+        if (memcmp(recovered_message, original_message, MESSAGE_LENGTH) == 0) {
+            found_candidate = candidate;
             break;
         }
     }
 
-    double elapsed_seconds = get_time() - start_time;
+    double elapsed_seconds = get_time() - start_seconds;
 
-    if (found_key != UINT64_MAX) {
-        printf("Clave encontrada: %" PRIu64 "\n", found_key);
+    if (found_candidate != UINT64_MAX) {
+        printf("Clave encontrada: %" PRIu64 "\n", found_candidate);
         printf("Mensaje: ");
-        fwrite(plain_text, 1, MESSAGE_LEN, stdout);
+        fwrite(recovered_message, 1, MESSAGE_LENGTH, stdout);
         putchar('\n');
     } else {
         printf("No se encontro la clave.\n");
@@ -184,7 +184,7 @@ int main(void)
     printf("Ejecucion: secuencial\n");
     printf("Tiempo: %.6f segundos\n", elapsed_seconds);
 
-    EVP_CIPHER_CTX_free(cipher_ctx);
+    EVP_CIPHER_CTX_free(cipher_context);
 
     return EXIT_SUCCESS;
 }

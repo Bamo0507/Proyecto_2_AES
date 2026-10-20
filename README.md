@@ -4,19 +4,19 @@ Proyecto del curso **CC3169 — Computación Paralela y Distribuida**, Universid
 del Valle de Guatemala. Integrantes: Adriana Palacios, Bryan Martínez y Daniela
 Ramírez.
 
-El proyecto se organiza por enfoque de implementación, con módulos compartidos
-para reutilizar el código común.
+El código está separado según la forma de buscar la clave. Las partes que usan
+varias versiones se reúnen en una misma carpeta para evitar repetirlas.
 
 ## Organización
 
-| Ruta | Contenido |
+| Carpeta o archivo | Qué contiene |
 | --- | --- |
-| `src/sequential/` | Implementaciones secuenciales, incluida la versión original como referencia. |
-| `src/distributed/` | Implementaciones MPI: reparto cíclico y búsqueda por bloques desde archivo. |
-| `src/common/` | Código compartido entre las implementaciones. |
-| `tests/` | Pruebas para verificar el funcionamiento del código. |
-| `scripts/` | Scripts de apoyo para automatizar tareas del proyecto. |
-| `docs/` | Documentación, propuestas y diagramas. |
-| `results/` | Resultados de los experimentos. |
-| `build/` | Archivos generados durante la compilación. |
-| `Makefile` | Configuración de compilación y tareas de verificación. |
+| `src/sequential/` | Versiones que prueban las claves una por una con un solo trabajador. Incluye el ejemplo original. |
+| `src/distributed/` | Versiones que reparten la búsqueda entre varios trabajadores mediante MPI. |
+| `src/common/` | Funciones que comparten las versiones, como cifrar un mensaje o revisar una posible clave. |
+| `tests/` | Pruebas para comprobar que los programas funcionan como esperamos. |
+| `scripts/` | Programas de apoyo para repetir pruebas y guardar sus resultados. |
+| `docs/` | Explicaciones, propuestas y diagramas del proyecto. |
+| `results/` | Resultados de las pruebas y comparaciones. |
+| `build/` | Archivos que se crean al preparar los programas para ejecutarlos. |
+| `Makefile` | Instrucciones para preparar los programas y ejecutar las pruebas. |
