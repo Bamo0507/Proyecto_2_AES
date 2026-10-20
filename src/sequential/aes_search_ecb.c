@@ -12,6 +12,8 @@
  *              1,048,576 candidatas del espacio de claves de AES.
  *              El cifrado utiliza la interfaz EVP de OpenSSL.
  *              Se mide el tiempo transcurrido durante la busqueda.
+ *              Referencia docente ECB, separada de la comparacion CTR/MPI.
+ *              Uso: ./build/bin/aes_search_ecb
  *----------------------------------------------------------------------*/
 
 #define _POSIX_C_SOURCE 200809L

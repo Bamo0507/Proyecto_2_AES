@@ -7,6 +7,13 @@ busqueda_clave_aes_secuencial_mejorado
 *.o
 *.out
 *.dSYM/
+/build/
+
+# Salidas locales de los experimentos; la metodologia si se versiona
+/results/runs/
+
+# Planes locales generados por la skill de brainstorming
+/docs/
 
 # macOS
 .DS_Store
